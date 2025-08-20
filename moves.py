@@ -26,3 +26,23 @@ def pawn_moves(board,row,col):
 
     return moves
 
+def rook_moves(board,row,col):
+    piece=board[row][col]
+    moves=[]
+    if not piece or piece.name!='R':
+        return moves
+
+    directions=[(1,0),(-1,0),(0,1),(0,-1)]
+    for dr,dc in directions:
+        r,c = row+dr, col+dc
+        while 0 <= r < 8 and 0 <= c < 8:
+            target = board[r][c]
+            if target is None:
+                moves.append((r,c))
+            elif target.colour != piece.colour:
+                moves.append((r,c))
+            else:
+                break
+            r+=dr
+            c+=dc
+    return moves
