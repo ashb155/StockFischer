@@ -61,3 +61,25 @@ def knight_moves(board,row,col):
             if target is None or target.color != piece.color:
                 moves.append((r, c))
     return moves
+
+def bishop_moves(board,row,col):
+    piece=board[row][col]
+    moves=[]
+    if not piece or piece.name != 'B':
+        return moves
+
+    directions = [(1,1),(1,-1),(-1,1),(-1,-1)]
+    for dr, dc in directions:
+        r, c = row + dr, col + dc
+        while 0 <= r < 8 and 0 <= c < 8:
+            target = board[r][c]
+            if target is None:
+                moves.append((r, c))
+            elif target.color != piece.color:
+                moves.append((r, c))
+                break
+            else:
+                break
+            r += dr
+            c += dc
+    return moves
