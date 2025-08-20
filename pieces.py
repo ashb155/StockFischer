@@ -4,4 +4,4 @@ class Piece:
         self.name=name
 
     def __str__(self):
-        return self.color + self.name
+        return self.colour + self.name
