@@ -1,4 +1,5 @@
 from pieces import Piece
+from moves import pawn_moves
 
 def create_board():
     empty=None
@@ -22,3 +23,8 @@ def print_board(board):
 
 board=create_board()
 print_board(board)
+
+pawn_position=[(6,i) for i in range(8)]
+for row,col in pawn_position:
+    moves=pawn_moves(board,row,col)
+    print(f"Pawn at ({row},{col}) can move to : {moves}")
