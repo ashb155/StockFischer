@@ -46,3 +46,18 @@ def rook_moves(board,row,col):
             r+=dr
             c+=dc
     return moves
+
+def knight_moves(board,row,col):
+    piece=board[row][col]
+    moves=[]
+    if not piece or piece.name !='N':
+        return moves
+
+    directions=[(-2,-1),(-2,1),(-1,-2),(-1,2),(1,-2),(1,2),(2,-1),(2,1)]
+    for dr,dc in directions:
+        r,c = row+dr, col+dc
+        if 0 <= r < 8 and 0 <= c < 8:
+            target = board[r][c]
+            if target is None or target.color != piece.color:
+                moves.append((r, c))
+    return moves
