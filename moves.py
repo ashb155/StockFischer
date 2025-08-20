@@ -83,3 +83,22 @@ def bishop_moves(board,row,col):
             r += dr
             c += dc
     return moves
+
+def queen_moves(board, row, col):
+    return rook_moves(board, row, col) + bishop_moves(board, row, col)
+
+
+def king_moves(board, row, col):
+    piece = board[row][col]
+    moves = []
+    if not piece or piece.name != 'K':
+        return moves
+
+    directions = [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)]
+    for dr, dc in directions:
+        r, c = row + dr, col + dc
+        if 0 <= r < 8 and 0 <= c < 8:
+            target = board[r][c]
+            if target is None or target.color != piece.color:
+                moves.append((r,c))
+    return moves
