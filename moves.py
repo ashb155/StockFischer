@@ -16,7 +16,7 @@ def pawn_moves(board,row,col):
             moves.append((row+2*direction,col))
 
 
-    for diagonal in range(-1,2):
+    for diagonal in [-1,1]:
         ncol= col + diagonal
         nrow= row + direction
         if 0 <= nrow < 8 and 0 <= ncol < 8:
@@ -58,7 +58,7 @@ def knight_moves(board,row,col):
         r,c = row+dr, col+dc
         if 0 <= r < 8 and 0 <= c < 8:
             target = board[r][c]
-            if target is None or target.color != piece.color:
+            if target is None or target.colour != piece.colour:
                 moves.append((r, c))
     return moves
 
@@ -75,7 +75,7 @@ def bishop_moves(board,row,col):
             target = board[r][c]
             if target is None:
                 moves.append((r, c))
-            elif target.color != piece.color:
+            elif target.colour != piece.colour:
                 moves.append((r, c))
                 break
             else:
@@ -99,6 +99,6 @@ def king_moves(board, row, col):
         r, c = row + dr, col + dc
         if 0 <= r < 8 and 0 <= c < 8:
             target = board[r][c]
-            if target is None or target.color != piece.color:
+            if target is None or target.colour != piece.colour:
                 moves.append((r,c))
     return moves

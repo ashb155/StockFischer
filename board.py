@@ -18,13 +18,9 @@ def create_board():
     return board
 
 def print_board(board):
-    for row in board:
-        print(" ".join(str(piece) if piece else '--' for piece in row))
+    for i,row in enumerate(board):
+        print(8-i," ".join(str(piece) if piece else '--' for piece in row))
+    print("  a  b  c  d  e  f  g  h")
 
 board=create_board()
 print_board(board)
-
-pawn_position=[(6,i) for i in range(8)]
-for row,col in pawn_position:
-    moves=pawn_moves(board,row,col)
-    print(f"Pawn at ({row},{col}) can move to : {moves}")
