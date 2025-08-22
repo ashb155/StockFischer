@@ -8,7 +8,7 @@ class Game:
         self.history = []
 
     def get_moves(self,row,col):
-        piece = self.board(row,col)
+        piece = self.board[row][col]
         if not piece:
             return []
         if piece.name== 'P':
@@ -45,3 +45,15 @@ class Game:
         self.turn='b' if self.turn== 'w' else 'w'
         self.move_count+=1
         return True
+
+def notation_to_index(move):
+    col_map = {'a': 0, 'b': 1, 'c': 2, 'd': 3,
+               'e': 4, 'f': 5, 'g': 6, 'h': 7}
+    col = col_map[move[0].lower()]
+    row = 8 - int(move[1])
+    return (row, col)
+
+def index_to_notation(pos):
+    col_map = 'abcdefgh'
+    row, col = pos
+    return col_map[col] + str(8 - row)

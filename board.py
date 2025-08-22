@@ -22,5 +22,3 @@ def print_board(board):
         print(8-i," ".join(str(piece) if piece else '--' for piece in row))
     print("  a  b  c  d  e  f  g  h")
 
-board=create_board()
-print_board(board)
