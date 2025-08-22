@@ -16,7 +16,7 @@ def pawn_moves(board,row,col):
             moves.append((row+2*direction,col))
 
 
-    for diagonal in [-1,1]:
+    for diagonal in [-1,1]:     #capturing
         ncol= col + diagonal
         nrow= row + direction
         if 0 <= nrow < 8 and 0 <= ncol < 8:
@@ -37,9 +37,9 @@ def rook_moves(board,row,col):
         r,c = row+dr, col+dc
         while 0 <= r < 8 and 0 <= c < 8:
             target = board[r][c]
-            if target is None:
+            if target is None:  #empty square
                 moves.append((r,c))
-            elif target.colour != piece.colour:
+            elif target.colour != piece.colour: #if same colour then occupied square
                 moves.append((r,c))
             else:
                 break

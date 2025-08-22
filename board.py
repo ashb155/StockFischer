@@ -19,6 +19,6 @@ def create_board():
 
 def print_board(board):
     for i,row in enumerate(board):
-        print(8-i," ".join(str(piece) if piece else '--' for piece in row))
+        print(8-i," ".join(str(piece) if piece else '--' for piece in row)) #prints board in 8*8 format
     print("  a  b  c  d  e  f  g  h")
 

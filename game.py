@@ -4,7 +4,7 @@ class Game:
     def __init__(self):
         self.board = create_board()
         self.turn='w'
-        self.move_count=1
+        self.move_count=0
         self.history = []
 
     def get_moves(self,row,col):
