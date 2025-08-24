@@ -41,6 +41,7 @@ def rook_moves(board,row,col):
                 moves.append((r,c))
             elif target.colour != piece.colour: #if same colour then occupied square
                 moves.append((r,c))
+                break
             else:
                 break
             r+=dr
