@@ -31,7 +31,7 @@ def pawn_moves(board,row,col,enpassant=None):
 def rook_moves(board,row,col):
     piece=board[row][col]
     moves=[]
-    if not piece or piece.name!='R':
+    if not piece or piece.name not in ['R','Q']: #part of queen function also
         return moves
 
     directions=[(1,0),(-1,0),(0,1),(0,-1)]
@@ -68,7 +68,7 @@ def knight_moves(board,row,col):
 def bishop_moves(board,row,col):
     piece=board[row][col]
     moves=[]
-    if not piece or piece.name != 'B':
+    if not piece or piece.name not in ['B','Q']: #part of queen function also
         return moves
 
     directions = [(1,1),(1,-1),(-1,1),(-1,-1)]
