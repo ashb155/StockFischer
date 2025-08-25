@@ -1,6 +1,6 @@
 from pieces import Piece
 
-def pawn_moves(board,row,col):
+def pawn_moves(board,row,col,enpassant=None):
     piece=board[row][col]
     moves=[]
 
@@ -23,6 +23,8 @@ def pawn_moves(board,row,col):
             target = board[nrow][ncol]
             if target and target.colour != piece.colour:
                 moves.append((nrow,ncol))
+            if enpassant and (nrow, ncol) == enpassant:
+                moves.append((nrow, ncol))
 
     return moves
 

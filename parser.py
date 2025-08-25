@@ -10,7 +10,7 @@ def parser(move,game):
 
     #capture marker
     capture= "x" in move
-    move=move.replace("x","x")
+    move=move.replace("x","")
 
     #destination square
     destsq=move[-2:]

@@ -6,6 +6,7 @@ class Game:
         self.turn='w'
         self.move_count=0
         self.history = []
+        self.enpassant=None
 
     def get_moves(self,row,col):
         piece = self.board[row][col]
@@ -29,8 +30,15 @@ class Game:
         r2,c2 = end
         piece= self.board[r1][c1]
 
+
         if not piece or piece.colour != self.turn:
             return False
+
+        if piece.name == 'P' and self.enpassant and end == self.enpassant: #enables en passant captures
+            if piece.colour=='w':
+                self.board[r2+1][c2] = None
+            else:
+                self.board[r2-1][c2] = None
 
         moves=self.get_moves(r1,c1)
         if (r2,c2) not in moves:
@@ -39,6 +47,11 @@ class Game:
 
         self.board[r2][c2]=piece
         self.board[r1][c1]=None
+
+        self.enpassant = None
+        if piece.name == 'P' and abs(r2 - r1) == 2: #adds possible en passant targets
+            mid_row = (r1 + r2) // 2
+            self.enpassant = (mid_row, c1)
 
         self.history.append(((r1,c1),(r2,c2),piece))
 
