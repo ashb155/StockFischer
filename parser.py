@@ -12,6 +12,9 @@ def parser(move,game):
     capture= "x" in move
     move=move.replace("x","")
 
+    if len(move)<2:
+        return None, None
+
     #destination square
     destsq=move[-2:]
     dest=notation_to_index(destsq)
@@ -34,4 +37,4 @@ def parser(move,game):
     if len(candidates) == 1:
         return candidates[0], dest
     else:
-        return False
+        return None, None

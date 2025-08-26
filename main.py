@@ -3,28 +3,23 @@ from board import print_board
 from parser import parser
 import os
 
-
 def refresh():
-        os.system('cls' if os.name == 'nt' else 'clear')
-
+    os.system('cls' if os.name == 'nt' else 'clear')
 game = Game()
-
 while True:
     refresh()
-    print('''
-     StockFischer 1.0''')
+    print("\nStockFischer 1.0")
     print_board(game.board)
+
+    if game.state:
+        print("Game state:", game.state)
+        if game.state in ["Checkmate", "Stalemate"]:
+            break
 
     move = input("Enter move: ")
     try:
         start, end = parser(move, game)
-
-        if game.make_move(start, end):
-            pass  # board will redraw on next loop
-        else:
-            print("Illegal move")
-            input("Press Enter...")  # pause before redraw
-
+        if not game.make_move(start, end):
+            input("Invalid move. Press Enter...")
     except Exception as e:
-        print("Error:", e)
-        break
+        input(f"Error: {e}. Press Enter...")
