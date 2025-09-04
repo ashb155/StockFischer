@@ -2,6 +2,20 @@ from game import notation_to_index,index_to_notation
 
 def parser(move,game):
     move=move.strip()
+
+    #castling notation
+    if move =='0-0':
+        if game.turn == 'w':
+            return (7,4),(7,6)
+        else:
+            return (0,4),(0,6)
+
+    if move == '0-0-0':
+        if game.turn == 'w':
+            return (7,4),(7,2)
+        else:
+            return (0,4),(0,2)
+
     pieces = {'N': 'N', 'B': 'B', 'R': 'R', 'Q': 'Q', 'K': 'K'}
     piece_type = 'P'
     if move[0] in pieces:
