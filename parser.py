@@ -6,15 +6,15 @@ def parser(move,game):
     #castling notation
     if move =='0-0':
         if game.turn == 'w':
-            return (7,4),(7,6)
+            return (7,4),(7,6),None
         else:
-            return (0,4),(0,6)
+            return (0,4),(0,6),None
 
     if move == '0-0-0':
         if game.turn == 'w':
-            return (7,4),(7,2)
+            return (7,4),(7,2),None
         else:
-            return (0,4),(0,2)
+            return (0,4),(0,2),None
 
     #promotion
     promotion = None
@@ -33,7 +33,7 @@ def parser(move,game):
     move=move.replace("x","")
 
     if len(move)<2:
-        return None, None
+        return None, None, None
 
     #destination square
     destsq=move[-2:]
