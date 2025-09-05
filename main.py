@@ -18,8 +18,8 @@ while True:
 
     move = input("Enter move: ")
     try:
-        start, end = parser(move, game)
-        if not game.make_move(start, end):
+        start, end, promotion = parser(move, game)
+        if not game.make_move(start, end, promotion):
             input("Invalid move. Press Enter...")
     except Exception as e:
         input(f"Error: {e}. Press Enter...")

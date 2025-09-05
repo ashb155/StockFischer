@@ -31,12 +31,11 @@ class Game:
             return queen_moves(self.board, row, col)
         elif piece.name == 'K':
             moves = king_moves(self.board, row, col)
-            moves.extend(self._castling_moves(piece, row, col))
+            moves.extend(self.castling_moves(piece, row, col))
             return moves
-        return []
-
+        return
     #castling
-    def _castling_moves(self, king, row, col):
+    def castling_moves(self, king, row, col):
         moves = []
         if king.colour == 'w' and row == 7 and col == 4:
             if self.castling['wKR'] and self.board[7][5] is None and self.board[7][6] is None:
@@ -94,7 +93,7 @@ class Game:
         return legal_moves
 
 
-    def _force_move(self, start, end):
+    def _force_move(self, start, end, promotion = 'Q'):
         r1, c1 = start
         r2, c2 = end
         piece = self.board[r1][c1]
@@ -110,38 +109,18 @@ class Game:
         self.board[r2][c2] = piece
         self.board[r1][c1] = None
 
-        self.enpassant = None
-        if piece.name == 'P' and abs(r2 - r1) == 2:
-            self.enpassant = ((r1 + r2) // 2, c1)
-
-        return True
-
-    #makes moves and updates game state
-    def make_move(self, start, end):
-        if start is None or end is None:
-            return False
-
-        r1, c1 = start
-        r2, c2 = end
-        piece = self.board[r1][c1]
-
-        if not piece or piece.colour != self.turn:
-            return False
-
-        moves = self.get_moves(r1, c1)
-        if (r2, c2) not in moves:
-            return False
-
         if piece.name == 'K' and abs(c2 - c1) == 2:
-            if c2 == 6:
+            if c2 == 6:  # Kingside
                 self.board[r2][5] = self.board[r2][7]
                 self.board[r2][7] = None
-            elif c2 == 2:
+            elif c2 == 2:  # Queenside
                 self.board[r2][3] = self.board[r2][0]
                 self.board[r2][0] = None
 
-        self.board[r2][c2] = piece
-        self.board[r1][c1] = None
+        if piece.name == 'P':
+            if (piece.colour == 'w' and r2 == 0) or (piece.colour == 'b' and r2 == 7):
+                from pieces import Piece
+                self.board[r2][c2] = Piece(piece.colour, promotion)
 
         if piece.name == 'K':
             if piece.colour == 'w':
@@ -166,7 +145,27 @@ class Game:
         if piece.name == 'P' and abs(r2 - r1) == 2:
             self.enpassant = ((r1 + r2) // 2, c1)
 
-        self.history.append(((r1, c1), (r2, c2), piece))
+        return True
+
+    #makes moves and updates game state
+    def make_move(self, start, end, promotion='Q'):
+        if start is None or end is None:
+            return False
+
+        r1, c1 = start
+        r2, c2 = end
+        piece = self.board[r1][c1]
+
+        if not piece or piece.colour != self.turn:
+            return False
+
+        moves = self.get_moves(r1, c1)
+        if end not in moves:
+            return False
+
+        self._force_move(start, end, promotion)
+
+        self.history.append((start, end, piece))
         self.turn = 'b' if self.turn == 'w' else 'w'
         self.move_count += 0.5
 

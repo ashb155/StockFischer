@@ -16,6 +16,12 @@ def parser(move,game):
         else:
             return (0,4),(0,2)
 
+    #promotion
+    promotion = None
+    if len(move) > 2 and move[-1] in "QRBN":
+        promotion = move[-1]
+        move = move[:-1]
+
     pieces = {'N': 'N', 'B': 'B', 'R': 'R', 'Q': 'Q', 'K': 'K'}
     piece_type = 'P'
     if move[0] in pieces:
@@ -49,6 +55,6 @@ def parser(move,game):
                     candidates.append((r, c))
 
     if len(candidates) == 1:
-        return candidates[0], dest
+        return candidates[0], dest, promotion
     else:
-        return None, None
+        return None, None, None
