@@ -39,9 +39,13 @@ def parser(move,game):
     destsq=move[-2:]
     dest=notation_to_index(destsq)
 
-    file=None
-    if piece_type=='P' and capture:
-        file=move[0]
+    disambig = move[:-2]
+    file_hint, rank_hint = None, None
+    for ch in disambig:
+        if ch in "abcdefgh":
+            file_hint = ch
+        elif ch in "12345678":
+            rank_hint = ch
 
     candidates = []
     for r in range(8):
@@ -49,9 +53,11 @@ def parser(move,game):
             piece = game.board[r][c]
             if piece and piece.colour == game.turn and piece.name == piece_type:
                 if dest in game.get_moves(r, c):
-                    if file:
-                        if index_to_notation((r, c))[0] != file:
-                            continue
+                    notation = index_to_notation((r, c))
+                    if file_hint and notation[0] != file_hint:
+                        continue
+                    if rank_hint and notation[1] != rank_hint:
+                        continue
                     candidates.append((r, c))
 
     if len(candidates) == 1:
