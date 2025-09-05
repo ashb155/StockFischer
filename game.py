@@ -14,6 +14,10 @@ class Game:
         self.state = None            #game state checker (check, checkmate, stalemate)
         self.castling = {'wKR': True, 'wQR': True, 'bKR': True, 'bQR': True}  #castling checker for rooks
 
+        self.move_clock=0            #50 move rule
+        self.position_count={}       #repition map for 3-fold moves
+        self.position_count[self.board_key()] = 1
+
 
     def pseudo_moves(self, row, col): #returns moves from a square without considering legality
         piece = self.board[row][col]
@@ -149,8 +153,7 @@ class Game:
 
         return True
 
-
-    def make_move(self, start, end, promotion='Q'): #executes move and updates game state
+    def make_move(self, start, end, promotion='Q'):  # executes move and updates game state
         if start is None or end is None:
             return False
 
@@ -164,22 +167,50 @@ class Game:
         if end not in moves:
             return False
 
+        # detect captured piece (fix for en passant)
+        captured = self.board[end[0]][end[1]]
+        if piece.name == 'P' and self.enpassant and end == self.enpassant:
+            if piece.colour == 'w':
+                captured = self.board[end[0] + 1][end[1]]
+            else:
+                captured = self.board[end[0] - 1][end[1]]
+
         self._force_move(start, end, promotion)
 
-        self.history.append((start, end, piece))
-        self.turn = 'b' if self.turn == 'w' else 'w'
-        self.move_count += 0.5
+        # add promotion info
+        history_entry = (start, end, piece, captured,
+                         promotion if piece.name == 'P' and (end[0] == 0 or end[0] == 7) else None)
 
+        self.history.append(history_entry)
+
+        self.turn = 'b' if self.turn == 'w' else 'w'
+        if self.turn == 'w':
+                self.move_count+=1
+        # 50-move rule
+        if piece.name == 'P' or captured:
+            self.move_clock = 0
+        else:
+            self.move_clock += 1
+
+        # update repetition count
+        key = self.board_key()
+        self.position_count[key] = self.position_count.get(key, 0) + 1
+
+        # check game state
         if self.is_checkmate(self.turn):
             self.state = "Checkmate"
         elif self.is_stalemate(self.turn):
             self.state = "Stalemate"
+        elif self.move_clock >= 100:
+            self.state = "Draw (50-move rule)"
+        elif self.position_count[key] >= 3:
+            self.state = "Draw (Threefold repetition)"
         elif self.is_check(self.turn):
             self.state = "Check"
         else:
             self.state = None
-        return True
 
+        return True
 
     def square_attacked(self, square, colour): #checks if any square is attacked
         for row in range(8):
@@ -232,6 +263,17 @@ class Game:
 
     def copy(self):         #creates copy
         return copy.deepcopy(self)
+
+    def board_key(self):
+        rows = []
+        for r in range(8):
+            row = []
+            for c in range(8):
+                p = self.board[r][c]
+                row.append(p.colour + p.name if p else ".")
+            rows.append("".join(row))
+        return "/".join(rows) + " " + self.turn
+
 
 
 

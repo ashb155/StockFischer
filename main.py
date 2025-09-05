@@ -12,8 +12,8 @@ while True:
     print_board(game.board)
 
     if game.state:
-        print("Game state:", game.state)
-        if game.state in ["Checkmate", "Stalemate"]:
+        print(game.state)
+        if game.state in ["Checkmate", "Stalemate","Draw (Threefold repetition)","Draw (50-move rule)"]:
             break
 
     move = input("Enter move: ")
