@@ -1,3 +1,4 @@
+#piece class
 class Piece:
     def __init__(self,colour,name):
         self.colour=colour

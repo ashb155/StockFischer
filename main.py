@@ -4,7 +4,7 @@ from parser import parser
 import os
 
 def refresh():
-    os.system('cls' if os.name == 'nt' else 'clear')
+    os.system('cls' if os.name == 'nt' else 'clear') #for terminal
 game = Game()
 while True:
     refresh()

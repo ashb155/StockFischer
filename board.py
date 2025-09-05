@@ -1,6 +1,6 @@
 from pieces import Piece
-from moves import pawn_moves
 
+#creates board
 def create_board():
     empty=None
     board = [
@@ -17,6 +17,7 @@ def create_board():
     ]
     return board
 
+#prints board with co-ordinates
 def print_board(board):
     for i,row in enumerate(board):
         print(8-i," ".join(str(piece) if piece else '--' for piece in row)) #prints board in 8*8 format

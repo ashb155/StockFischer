@@ -2,48 +2,50 @@ import copy
 from board import create_board
 from moves import pawn_moves, rook_moves, bishop_moves, knight_moves, queen_moves, king_moves
 
+#game class
 class Game:
     def __init__(self):
 
-        self.board = create_board()
-        self.turn = 'w'
-        self.move_count = 0
-        self.history = []
-        self.enpassant = None
-        self.state = None
-        self.castling = {'wKR': True, 'wQR': True, 'bKR': True, 'bQR': True}
+        self.board = create_board()  #creates board
+        self.turn = 'w'              #colour to play
+        self.move_count = 0          #move count
+        self.history = []            #move history
+        self.enpassant = None        #enpassant checker
+        self.state = None            #game state checker (check, checkmate, stalemate)
+        self.castling = {'wKR': True, 'wQR': True, 'bKR': True, 'bQR': True}  #castling checker for rooks
 
 
-    def pseudo_moves(self, row, col):
+    def pseudo_moves(self, row, col): #returns moves from a square without considering legality
         piece = self.board[row][col]
         if not piece:
             return []
 
         if piece.name == 'P':
-            return pawn_moves(self.board, row, col, self.enpassant)
+            return pawn_moves(self.board, row, col, self.enpassant)     #returns pawn moves if pawn
         elif piece.name == 'N':
-            return knight_moves(self.board, row, col)
+            return knight_moves(self.board, row, col)                   #returns knight moves if knight
         elif piece.name == 'B':
-            return bishop_moves(self.board, row, col)
+            return bishop_moves(self.board, row, col)                   #return bishop moves if bishop
         elif piece.name == 'R':
-            return rook_moves(self.board, row, col)
+            return rook_moves(self.board, row, col)                     #returns rook moves if rook
         elif piece.name == 'Q':
-            return queen_moves(self.board, row, col)
+            return queen_moves(self.board, row, col)                    #returns queen moves if queen
         elif piece.name == 'K':
-            moves = king_moves(self.board, row, col)
-            moves.extend(self.castling_moves(piece, row, col))
+            moves = king_moves(self.board, row, col)                    #returns king moves if king
+            moves.extend(self.castling_moves(piece, row, col))          #adds castling moves
             return moves
-        return
-    #castling
-    def castling_moves(self, king, row, col):
+
+        return []
+
+    def castling_moves(self, king, row, col): #returns castling moves if legal squares are free and not attacked
         moves = []
-        if king.colour == 'w' and row == 7 and col == 4:
-            if self.castling['wKR'] and self.board[7][5] is None and self.board[7][6] is None:
+        if king.colour == 'w' and row == 7 and col == 4:  #checks starting square of king
+            if self.castling['wKR'] and self.board[7][5] is None and self.board[7][6] is None: #checks for pieces between king and rook
                 if not self.square_attacked((7, 4), 'b') and not self.square_attacked((7, 5), 'b') and not self.square_attacked((7, 6), 'b'):
-                    moves.append((7, 6))
+                    moves.append((7, 6)) #adds moves if no check or attack on the adjoining empty squares
             if self.castling['wQR'] and self.board[7][3] is None and self.board[7][2] is None and self.board[7][1] is None:
                 if not self.square_attacked((7, 4), 'b') and not self.square_attacked((7, 3), 'b') and not self.square_attacked((7, 2), 'b'):
-                    moves.append((7, 2))
+                    moves.append((7, 2)) #adds moves if no check or attack on the adjoining empty squares
         elif king.colour == 'b' and row == 0 and col == 4:
             if self.castling['bKR'] and self.board[0][5] is None and self.board[0][6] is None:
                 if not self.square_attacked((0, 4), 'w') and not self.square_attacked((0, 5), 'w') and not self.square_attacked((0, 6), 'w'):
@@ -53,12 +55,12 @@ class Game:
                     moves.append((0, 2))
         return moves
 
-    #attack moves
-    def attack_moves(self, row, col):
+
+    def attack_moves(self, row, col):  #returns squares a piece attacks
         piece = self.board[row][col]
         if not piece:
             return []
-        if piece.name == 'P':
+        if piece.name == 'P':  #pawn attacks directly
             direction = -1 if piece.colour == 'w' else 1
             moves = []
             nrow = row + direction
@@ -80,8 +82,8 @@ class Game:
             return king_moves(self.board, row, col)
         return []
 
-    #legal moves
-    def get_moves(self, row, col):
+
+    def get_moves(self, row, col): #returns all legal moves
         piece = self.board[row][col]
         moves = self.pseudo_moves(row, col)
         legal_moves = []
@@ -93,7 +95,7 @@ class Game:
         return legal_moves
 
 
-    def _force_move(self, start, end, promotion = 'Q'):
+    def _force_move(self, start, end, promotion = 'Q'): #used for internal simulation on copies to check legality
         r1, c1 = start
         r2, c2 = end
         piece = self.board[r1][c1]
@@ -147,13 +149,12 @@ class Game:
 
         return True
 
-    #makes moves and updates game state
-    def make_move(self, start, end, promotion='Q'):
+
+    def make_move(self, start, end, promotion='Q'): #executes move and updates game state
         if start is None or end is None:
             return False
 
         r1, c1 = start
-        r2, c2 = end
         piece = self.board[r1][c1]
 
         if not piece or piece.colour != self.turn:
@@ -179,9 +180,8 @@ class Game:
             self.state = None
         return True
 
-    # Check is square attacked
-    def square_attacked(self, square, colour):
-        r, c = square
+
+    def square_attacked(self, square, colour): #checks if any square is attacked
         for row in range(8):
             for col in range(8):
                 piece = self.board[row][col]
@@ -190,8 +190,8 @@ class Game:
                         return True
         return False
 
-    #Checks check
-    def is_check(self, colour):
+
+    def is_check(self, colour):  #Checks check
         king_pos = None
         for r in range(8):
             for c in range(8):
@@ -205,8 +205,8 @@ class Game:
             return False
         return self.square_attacked(king_pos, 'b' if colour == 'w' else 'w')
 
-    # Checks checkmate
-    def is_checkmate(self, colour):
+
+    def is_checkmate(self, colour):     # Checks checkmate
         if not self.is_check(colour):
             return False
         for r in range(8):
@@ -217,8 +217,8 @@ class Game:
                         return False
         return True
 
-    # Checks stalemate
-    def is_stalemate(self, colour):
+
+    def is_stalemate(self, colour):  # Checks stalemate
         if self.is_check(colour):
             return False
         for r in range(8):
@@ -230,12 +230,12 @@ class Game:
         return True
 
 
-    def copy(self):
+    def copy(self):         #creates copy
         return copy.deepcopy(self)
 
 
 
-def notation_to_index(move):
+def notation_to_index(move): #converts notation to index
     col_map = {'a': 0, 'b': 1, 'c': 2, 'd': 3,
                'e': 4, 'f': 5, 'g': 6, 'h': 7}
     col = col_map.get(move[0].lower())
@@ -248,7 +248,7 @@ def notation_to_index(move):
     return (row, col)
 
 
-def index_to_notation(pos):
+def index_to_notation(pos): #converts index to notation
     col_map = 'abcdefgh'
     row, col = pos
     return col_map[col] + str(8 - row)
