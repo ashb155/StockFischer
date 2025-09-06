@@ -17,7 +17,7 @@ colour=input('Choose colour - w/b').strip().lower()
 game = Game()
 while True:
     refresh()
-    print("\nStockFischer 1.0")
+    print("\nStockFischer 2.0")
     print_board(game.board)
 
     if game.state:
