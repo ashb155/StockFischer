@@ -264,7 +264,20 @@ class Game:
     def copy(self):         #creates copy
         return copy.deepcopy(self)
 
-    def board_key(self):
+
+    def light_copy(self):   #lightweight copy for AI simulation purposes
+        copy=Game()
+        copy.board=[[piece for piece in row] for row in self.board]
+        copy.turn=self.turn
+        copy.enpassant=self.enpassant
+        copy.castling=self.castling.copy()
+        copy.move_count=self.move_count
+        copy.move_clock=self.move_clock
+        copy.state=self.state
+        return copy
+
+
+    def board_key(self):    #tracks for threefold repetition
         rows = []
         for r in range(8):
             row = []
@@ -294,3 +307,27 @@ def index_to_notation(pos): #converts index to notation
     col_map = 'abcdefgh'
     row, col = pos
     return col_map[col] + str(8 - row)
+
+def move_to_algebraic(game, start, end, promotion=None):
+    piece = game.board[start[0]][start[1]]
+    target_piece = game.board[end[0]][end[1]]
+
+    if piece.name == 'K' and abs(start[1] - end[1]) == 2:
+        return 'O-O' if end[1] == 6 else 'O-O-O'
+
+    move_str = ''
+    if piece.name != 'P':
+        move_str += piece.name  # N, B, R, Q, K
+
+    if target_piece or (piece.name == 'P' and start[1] != end[1]):
+        if piece.name == 'P':
+            move_str += index_to_notation(start)[0]  # file of pawn
+        move_str += 'x'
+
+    move_str += index_to_notation(end)
+
+    if promotion:
+        move_str += f"={promotion}"
+
+    return move_str
+

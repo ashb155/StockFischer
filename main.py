@@ -1,8 +1,9 @@
-from game import Game
+from game import Game, move_to_algebraic
 from board import print_board
 from parser import parser
 import os
-from ai import minimax
+from ai import minimax_sse
+import time
 
 
 def refresh():
@@ -10,9 +11,9 @@ def refresh():
 
 difficulty={'easy':2,'medium':3,"hard":5}
 
-level=input('Choose level - easy/medium/hard').strip().lower()
+level=input('Choose level - Easy / Medium / Hard').strip().lower()
 depth=difficulty.get(level,3)
-colour=input('Choose colour - w/b').strip().lower()
+colour=input('Choose colour - W / B').strip().lower()
 
 game = Game()
 while True:
@@ -35,7 +36,11 @@ while True:
             input(f"Error: {e}. Press Enter...")
     else:
         print('Thinking')
-        best_move=minimax(game, depth, (game.turn=='w'))
+        time.sleep(3)
+        best_move=minimax_sse(game, depth,  float('-inf'), float('inf'), game.turn == 'w')
         if best_move:
             (start,end,promotion)=best_move
+            algebraic = move_to_algebraic(game, start, end, promotion)
             game.make_move(start,end,promotion)
+            print(f"AI plays: {algebraic}")
+
