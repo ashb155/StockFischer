@@ -27,6 +27,7 @@ TT_EXACT = 0
 TT_ALPHA = 1
 TT_BETA = 2
 TT = {}
+TT_MAX_SIZE = 500000  # Added: Limit the TT size for performance
 
 # --- PIECE VALUES AND TABLES ---
 piece_values = {'P': 100, 'N': 320, 'B': 330, 'R': 500, 'Q': 900, 'K': 20000}
@@ -326,6 +327,7 @@ def static_exchange_eval_local(game, target, colour, move_cache):
 
 
 def quiescence_search(game, alpha, beta, maximizing, move_cache):
+    # Corrected function call: evaluate_board is a function, not a method
     eval_score = evaluate_board(game, move_cache)
     if maximizing:
         if eval_score >= beta: return beta
@@ -353,7 +355,7 @@ def quiescence_search(game, alpha, beta, maximizing, move_cache):
 
     for score, start, end, promotion in capture_moves:
         net_gain = static_exchange_eval_local(game, end, game.board[start[0]][start[1]].colour, move_cache)
-        if net_gain < 0: continue
+        if net_gain < -50: continue  # Changed: Relaxed pruning tolerance for speed/accuracy balance
 
         copy = game.light_copy()
         copy.make_move(start, end, promotion)
@@ -405,7 +407,8 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None, move_
                 return tt_score
 
     # --- Null Move Pruning (NMP) ---
-    R = 2  # Reduction Factor
+    # Dynamic Reduction Factor for better pruning at deeper levels
+    R = 2 + (1 if depth >= 5 else 0)
     if depth >= 3 and not game.is_check(game.turn):
 
         copy_null = game.light_copy()
@@ -463,7 +466,7 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None, move_
                 moves = move_cache.get((r, c), game.get_moves(r, c))
                 for move in moves:
                     promotion_options = ['Q', 'R', 'B', 'N'] if piece.name == 'P' and (
-                                move[0] == 0 or move[0] == 7) else [None]
+                            move[0] == 0 or move[0] == 7) else [None]
                     for p in promotion_options:
                         priority = calculate_priority((r, c), move, p, tt_best_move, pv_move_tuple)
                         all_moves.append((priority, (r, c), move, p))
@@ -487,7 +490,7 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None, move_
                     # SSE Check
             if is_capture:
                 net_gain = static_exchange_eval_local(game, end, game.board[start[0]][start[1]].colour, move_cache)
-                if net_gain < 0: continue
+                if net_gain < -50: continue
 
             copy = game.light_copy()
             copy.make_move(start, end, promotion)
@@ -532,7 +535,7 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None, move_
                     # SSE Check
             if is_capture:
                 net_gain = static_exchange_eval_local(game, end, game.board[start[0]][start[1]].colour, move_cache)
-                if net_gain < 0: continue
+                if net_gain < -50: continue
 
             copy = game.light_copy()
             copy.make_move(start, end, promotion)
@@ -567,6 +570,12 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None, move_
         tt_flag = TT_ALPHA
     elif score >= beta:
         tt_flag = TT_BETA
+
+    # TT Size Management
+    if len(TT) >= TT_MAX_SIZE:
+        keys_to_delete = list(TT.keys())[:int(TT_MAX_SIZE * 0.1)]  # Delete 10% of the oldest entries
+        for key in keys_to_delete:
+            del TT[key]
 
     if best_move:
         TT[tt_key] = {'depth': depth, 'score': score, 'flag': tt_flag, 'best_move': best_move}

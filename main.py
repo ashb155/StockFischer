@@ -13,7 +13,7 @@ def refresh():
 
 
 # --- Search Depth Mapping ---
-difficulty = {'easy': 2, 'medium': 3, "hard": 5}
+difficulty = {'easy': 2, 'medium': 3, "hard": 4}
 
 # --- time limit mapping by Difficulty ---
 time_limits = {'easy': 2.0, 'medium': 5.0, "hard": 10.0}
@@ -22,8 +22,8 @@ time_limits = {'easy': 2.0, 'medium': 5.0, "hard": 10.0}
 level = input('Choose level - Easy / Medium / Hard').strip().lower()
 
 # Get max depth and corresponding time limit based on the chosen level
-max_depth = difficulty.get(level, 3)
-TIME_LIMIT = time_limits.get(level, 5.0) # Default to 5.0s if level is unknown
+max_depth = difficulty.get(level, 4)
+TIME_LIMIT = time_limits.get(level, 10.0)
 
 colour = input('Choose colour - W / B').strip().lower()
 
