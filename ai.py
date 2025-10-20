@@ -145,7 +145,6 @@ def evaluate_board(game, move_cache=None):
     score = 0
     white_pawns, black_pawns = [], []
 
-    # --- Pre-calculate all moves for the current board state (Cached) ---
     all_moves_cache = {}
     for r in range(8):
         for c in range(8):
@@ -168,10 +167,49 @@ def evaluate_board(game, move_cache=None):
                 val += pawn_table[index]
             elif piece.name == 'N':
                 val += knight_table[index]
+
+                # --- NEW: Knight Outpost Bonus ---
+                is_supported = False
+                is_attackable = False
+                if piece.colour == 'w':
+                    support_r, attack_r = row + 1, row - 1
+                else:
+                    support_r, attack_r = row - 1, row + 1
+
+                # Check for friendly pawn support
+                if 0 <= support_r < 8:
+                    for dc in [-1, 1]:
+                        support_c = col + dc
+                        if 0 <= support_c < 8:
+                            p = game.board[support_r][support_c]
+                            if p and p.name == 'P' and p.colour == piece.colour:
+                                is_supported = True
+                                break
+
+                # Check for enemy pawn attacks
+                if 0 <= attack_r < 8:
+                    for dc in [-1, 1]:
+                        attack_c = col + dc
+                        if 0 <= attack_c < 8:
+                            p = game.board[attack_r][attack_c]
+                            if p and p.name == 'P' and p.colour != piece.colour:
+                                is_attackable = True
+                                break
+
+                if is_supported and not is_attackable:
+                    val += 20
+
+
             elif piece.name == 'B':
                 val += bishop_table[index]
             elif piece.name == 'R':
                 val += rook_table[index]
+
+
+                if (piece.colour == 'w' and row == 1) or (piece.colour == 'b' and row == 6):
+                    val += 25
+
+
             elif piece.name == 'Q':
                 val += queen_table[index]
             elif piece.name == 'K':
@@ -182,7 +220,6 @@ def evaluate_board(game, move_cache=None):
             if piece.name == 'P': (white_pawns if piece.colour == 'w' else black_pawns).append((row, col))
             score += val if piece.colour == 'w' else -val
 
-            # Hanging pieces: Now uses cached moves
             defenders, attackers = 0, 0
             for r1 in range(8):
                 for c1 in range(8):
@@ -217,7 +254,7 @@ def evaluate_board(game, move_cache=None):
         for r, c in pawns: files[c] += 1
         for f in range(8):
             if files[f] > 1: bonus -= 20 * (files[f] - 1)
-            if f == 0 and files[f - 1] == 0:
+            if f == 0 and files[f + 1] == 0:  # Corrected from files[f-1]
                 bonus -= 15
             elif f == 7 and files[f - 1] == 0:
                 bonus -= 15
@@ -225,6 +262,46 @@ def evaluate_board(game, move_cache=None):
                 bonus -= 15
 
         for r, c in pawns:
+
+            #backward pawns
+            is_backward = True
+            direction = 1 if colour == 'w' else -1  # 1 moves "behind" white, -1 moves "behind" black
+
+            for dc in [-1, 1]:
+                if not (0 <= c + dc < 8): continue
+                check_r = r
+                while (0 <= check_r < 8) if colour == 'w' else (0 <= check_r < 8):
+                    p = game.board[check_r][c + dc]
+                    if p and p.name == 'P' and p.colour == colour:
+                        is_backward = False  # Found support
+                        break
+                    if colour == 'w':
+                        check_r += 1  # Check ranks behind
+                    else:
+                        check_r -= 1  # Check ranks behind
+                if not is_backward: break
+
+            if is_backward:
+                front_r = r - direction
+                is_stoppable = False
+                if 0 <= front_r < 8:
+                    p_front = game.board[front_r][c]
+                    # Stopped by any enemy piece
+                    if p_front and p_front.colour != colour:
+                        is_stoppable = True
+                    else:
+                        # Or attackable by enemy pawn
+                        for dc in [-1, 1]:
+                            attack_c = c + dc
+                            if 0 <= attack_c < 8:
+                                p = game.board[front_r][attack_c]
+                                if p and p.name == 'P' and p.colour != colour:
+                                    is_stoppable = True
+                                    break  # Attackable, no need to check other side
+
+                if is_stoppable:
+                    bonus -= 10
+
             blocked = False
             for er, ec in enemy_pawns:
                 if ec in [c - 1, c, c + 1] and ((colour == 'w' and er < r) or (colour == 'b' and er > r)):
@@ -268,7 +345,6 @@ def evaluate_board(game, move_cache=None):
                       game.board[r][c] and game.board[r][c].colour == 'b')
     score += 10 * (white_moves - black_moves)
 
-    # Bishop pair (No change needed here)
     white_bishops = sum(1 for r in range(8) for c in range(8) if
                         game.board[r][c] and game.board[r][c].name == 'B' and game.board[r][c].colour == 'w')
     black_bishops = sum(1 for r in range(8) for c in range(8) if
@@ -277,7 +353,41 @@ def evaluate_board(game, move_cache=None):
     if black_bishops >= 2: score -= 50
 
     def king_safety(game, colour, move_cache):
-        return 0
+        kingr, kingc = None, None
+        for r in range(8):
+            for c in range(8):
+                piece = game.board[r][c]
+                if piece and piece.name == 'K' and piece.colour == colour:
+                    kingr, kingc = r, c
+                    break
+            if kingr is not None: break
+
+        if kingr is None: return 0  # Failsafe
+
+        danger = 0
+        for dr in [-1, 0, 1]:
+            for dc in [-1, 0, 1]:
+                if dr == 0 and dc == 0: continue
+                nr, nc = kingr + dr, kingc + dc
+                if 0 <= nr < 8 and 0 <= nc < 8:
+                    for r1 in range(8):
+                        for c1 in range(8):
+                            piece2 = game.board[r1][c1]
+                            if piece2 and piece2.colour != colour:
+                                attacker_moves = move_cache.get((r1, c1), [])
+                                if (nr, nc) in attacker_moves:
+                                    danger += 1
+
+        shield_bonus = 0
+        directions = -1 if colour == 'w' else 1
+        for dc in [-1, 0, 1]:
+            file = kingc + dc
+            for r in [kingr + directions, kingr + 2 * directions]:
+                if 0 <= r < 8 and 0 <= file < 8:
+                    p = game.board[r][file]
+                    if p and p.name == 'P' and p.colour == colour:
+                        shield_bonus += 15 if r == kingr + directions else 10
+        return -30 * danger + shield_bonus
 
     score += king_safety(game, 'w', all_moves_cache) * (1 - phase)
     score -= king_safety(game, 'b', all_moves_cache) * (1 - phase)
@@ -327,7 +437,6 @@ def static_exchange_eval_local(game, target, colour, move_cache):
 
 
 def quiescence_search(game, alpha, beta, maximizing, move_cache):
-    # Corrected function call: evaluate_board is a function, not a method
     eval_score = evaluate_board(game, move_cache)
     if maximizing:
         if eval_score >= beta: return beta
@@ -355,7 +464,7 @@ def quiescence_search(game, alpha, beta, maximizing, move_cache):
 
     for score, start, end, promotion in capture_moves:
         net_gain = static_exchange_eval_local(game, end, game.board[start[0]][start[1]].colour, move_cache)
-        if net_gain < -50: continue  # Changed: Relaxed pruning tolerance for speed/accuracy balance
+        if net_gain < -50: continue
 
         copy = game.light_copy()
         copy.make_move(start, end, promotion)
