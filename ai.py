@@ -1,4 +1,5 @@
 # File: ai.py
+# (Contains the fix for the TypeError)
 
 import time
 import random
@@ -27,7 +28,7 @@ TT_EXACT = 0
 TT_ALPHA = 1
 TT_BETA = 2
 TT = {}
-TT_MAX_SIZE = 500000  # Added: Limit the TT size for performance
+TT_MAX_SIZE = 500000
 
 # --- PIECE VALUES AND TABLES ---
 piece_values = {'P': 100, 'N': 320, 'B': 330, 'R': 500, 'Q': 900, 'K': 20000}
@@ -167,8 +168,7 @@ def evaluate_board(game, move_cache=None):
                 val += pawn_table[index]
             elif piece.name == 'N':
                 val += knight_table[index]
-
-                # --- NEW: Knight Outpost Bonus ---
+                # knight outpost
                 is_supported = False
                 is_attackable = False
                 if piece.colour == 'w':
@@ -204,7 +204,6 @@ def evaluate_board(game, move_cache=None):
                 val += bishop_table[index]
             elif piece.name == 'R':
                 val += rook_table[index]
-
 
                 if (piece.colour == 'w' and row == 1) or (piece.colour == 'b' and row == 6):
                     val += 25
@@ -263,7 +262,7 @@ def evaluate_board(game, move_cache=None):
 
         for r, c in pawns:
 
-            #backward pawns
+            # backward pawns
             is_backward = True
             direction = 1 if colour == 'w' else -1  # 1 moves "behind" white, -1 moves "behind" black
 
@@ -401,51 +400,84 @@ def evaluate_board(game, move_cache=None):
     return score
 
 
-def static_exchange_eval_local(game, target, colour, move_cache):
-    if not game.board[target[0]][target[1]]: return 0
+def static_exchange_eval_local(game, start, end, move_cache):
+    """
+    Calculates the score of a capture sequence on the 'end' square,
+    starting with the move 'start' -> 'end'.
+    Uses the fast `attack_moves` function instead of the slow `get_moves`.
+    """
+    attacker_piece = game.board[start[0]][start[1]]
+    target_piece = game.board[end[0]][end[1]]
 
+    if not attacker_piece or not target_piece:
+        return 0  # Not a capture
+
+    # 'gains' will store the value of *each piece captured* in the sequence
+    gains = [piece_values[target_piece.name]]
+
+    # Simulate the first capture
     copyg = game.light_copy()
-    gains = [piece_values[copyg.board[target[0]][target[1]].name]]
-    side = colour
-    MAX_STEPS = 32
-    steps = 0
+    copyg.make_move(start, end)
 
-    while steps < MAX_STEPS:
-        steps += 1
+
+    side = copyg.turn
+    target_square = end
+
+    while True:
         attackers = []
         for r in range(8):
             for c in range(8):
                 piece = copyg.board[r][c]
-                if not piece or piece.colour != side: continue
-                moves = move_cache.get((r, c), copyg.get_moves(r, c))
-                if target in moves: attackers.append((r, c))
-        if not attackers: break
+                if not piece or piece.colour != side:
+                    continue
 
-        best_attacker = min(attackers, key=lambda sq: piece_values[copyg.board[sq[0]][sq[1]].name])
-        copyg.make_move(best_attacker, target)
+                moves = copyg.attack_moves(r, c)
+
+                if target_square in moves:
+                    attackers.append((r, c))
+
+        if not attackers:
+            break  # No more attackers, sequence ends
+
+        # Find the least valuable attacker
+        best_attacker_pos = min(attackers, key=lambda sq: piece_values[copyg.board[sq[0]][sq[1]].name])
+
+        # The piece *on* the target square is the *next* victim
+        if not copyg.board[target_square[0]][target_square[1]]:
+            break  # Should not happen, but a good safeguard
+
+        victim_value = piece_values[copyg.board[target_square[0]][target_square[1]].name]
+        gains.append(victim_value)
+
+        # Simulate this next capture
+        copyg.make_move(best_attacker_pos, target_square)
+
+        # Swap sides for the next recapture
         side = 'b' if side == 'w' else 'w'
 
-        if copyg.board[target[0]][target[1]]:
-            gains.append(piece_values[copyg.board[target[0]][target[1]].name] - gains[-1])
-        else:
-            gains.append(-gains[-1])
 
-    for i in range(len(gains) - 2, -1, -1):
-        gains[i] = max(-gains[i + 1], gains[i])
+    score = 0
+    # Iterate backwards
+    for i in range(len(gains) - 1, -1, -1):
+        score = max(0, gains[i] - score)
 
-    return gains[0]
+
+    return gains[0] - score
+
 
 
 def quiescence_search(game, alpha, beta, maximizing, move_cache):
     eval_score = evaluate_board(game, move_cache)
     if maximizing:
-        if eval_score >= beta: return beta
+        if eval_score >= beta:
+            return beta
         alpha = max(alpha, eval_score)
     else:
-        if eval_score <= alpha: return alpha
+        if eval_score <= alpha:
+            return alpha
         beta = min(beta, eval_score)
 
-    capture_moves = []
+    forcing_moves = []
     colour = 'w' if maximizing else 'b'
 
     for r in range(8):
@@ -454,42 +486,70 @@ def quiescence_search(game, alpha, beta, maximizing, move_cache):
             if piece and piece.colour == colour:
                 moves = move_cache.get((r, c), game.get_moves(r, c))
                 for move in moves:
-                    if game.board[move[0]][move[1]]:
+
+                    is_capture = game.board[move[0]][move[1]] is not None
+                    is_check = False
+
+                    if is_capture:
                         victim_val = piece_values.get(game.board[move[0]][move[1]].name, 0)
                         attacker_val = piece_values.get(piece.name, 1)
-                        mvv_lva_score = victim_val * 10 - attacker_val
-                        capture_moves.append((mvv_lva_score, (r, c), move, None))
+                        # High priority for captures (MVV-LVA)
+                        priority = 10000 + victim_val * 10 - attacker_val
+                        forcing_moves.append((priority, (r, c), move, None))
 
-    capture_moves.sort(key=lambda x: x[0], reverse=maximizing)
+                    else:
+                        # Check if this non-capture move gives check
+                        copy = game.light_copy()
+                        copy.make_move((r, c), move)
+                        if copy.is_check('b' if maximizing else 'w'):
+                            is_check = True
 
-    for score, start, end, promotion in capture_moves:
-        net_gain = static_exchange_eval_local(game, end, game.board[start[0]][start[1]].colour, move_cache)
-        if net_gain < -50: continue
+                        if is_check:
+                            # Lower priority for checks, but still explore them
+                            priority = 5000
+                            forcing_moves.append((priority, (r, c), move, None))
 
+    # Sort moves: Best captures first, then checks
+    forcing_moves.sort(key=lambda x: x[0], reverse=True)
+
+    for priority, start, end, promotion in forcing_moves:
+
+        # For captures, run SEE to prune bad ones
+        if game.board[end[0]][end[1]] is not None:
+            # --- USE THE CORRECTED SSE FUNCTION ---
+            net_gain = static_exchange_eval_local(game, start, end, move_cache)
+            if net_gain < 0:  # Don't search losing captures
+                continue
+
+        # Make the move and search deeper
         copy = game.light_copy()
         copy.make_move(start, end, promotion)
 
-        q_eval = quiescence_search(copy, alpha, beta, not maximizing, move_cache.copy())
+        q_eval = quiescence_search(copy, alpha, beta, not maximizing, {})
 
         if maximizing:
-            if q_eval >= beta: return beta
+            if q_eval >= beta:
+                return beta
             alpha = max(alpha, q_eval)
         else:
-            if q_eval <= alpha: return alpha
+            if q_eval <= alpha:
+                return alpha
             beta = min(beta, q_eval)
 
+    # Return the best score found
     return alpha if maximizing else beta
 
 
-# --- Minimax Search Function with TT, Time Check, PV, Futility, NMP, and Heuristics ---
-def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None, move_cache=None,
+# --- Minimax Search Function (INTEGRATED PVS/LMR) ---
+def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
                 start_time=None, time_limit=None, principal_variation=None):
     if original_depth is None: original_depth = depth
-    if move_cache is None: move_cache = {}
+
+    # ---new local move_cache logic ---
+    move_cache = {}
 
     ply = original_depth - depth  # Current depth from root
 
-    # Time Check 1
     if time_limit and time.time() - start_time > time_limit:
         return None
 
@@ -515,16 +575,20 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None, move_
             if alpha >= beta:
                 return tt_score
 
-    # --- Null Move Pruning (NMP) ---
-    # Dynamic Reduction Factor for better pruning at deeper levels
+    # ---new Check Extensions ---
+    is_in_check = game.is_check(game.turn)
+    if is_in_check:
+        depth += 1  # Extend the search if in check
+
     R = 2 + (1 if depth >= 5 else 0)
-    if depth >= 3 and not game.is_check(game.turn):
+    if depth >= 3 and not is_in_check:
 
         copy_null = game.light_copy()
         copy_null.turn = 'b' if copy_null.turn == 'w' else 'w'
+        copy_null.enpassant = None
+
 
         null_eval = minimax_sse(copy_null, depth - 1 - R, -beta, -alpha, not maximizing, original_depth=original_depth,
-                                move_cache=move_cache.copy(),
                                 start_time=start_time, time_limit=time_limit)
 
         if null_eval is None: return None
@@ -532,8 +596,9 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None, move_
         if -null_eval >= beta:
             return beta
 
-            # Base Case
+    # Base Case
     if depth == 0 or game.state is not None:
+        # Pass local move_cache to Q-search
         score = quiescence_search(game, alpha, beta, maximizing, move_cache)
         TT[tt_key] = {'depth': 0, 'score': score, 'flag': TT_EXACT, 'best_move': None}
         return score
@@ -572,7 +637,11 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None, move_
         for c in range(8):
             piece = game.board[r][c]
             if piece and piece.colour == current_colour:
-                moves = move_cache.get((r, c), game.get_moves(r, c))
+
+                # --- new local cache population ---
+                moves = game.get_moves(r, c)
+                move_cache[(r, c)] = moves
+
                 for move in moves:
                     promotion_options = ['Q', 'R', 'B', 'N'] if piece.name == 'P' and (
                             move[0] == 0 or move[0] == 7) else [None]
@@ -582,33 +651,66 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None, move_
 
     all_moves.sort(key=lambda x: x[0], reverse=True)
 
-    # --- Search Loop (with Futility/Heuristic updates) ---
+    # --- Search Loop (INTEGRATED PVS/LMR) ---
+
+    move_index = 0  # For PVS/LMR
+
     if maximizing:
         max_eval = float('-inf')
+        # Pass local cache to eval
         static_eval = evaluate_board(game, move_cache)
 
         for priority, start, end, promotion in all_moves:
 
             is_capture = game.board[end[0]][end[1]]
 
-            # --- Futility Pruning for Non-Captures (Only if not PV/TT/Killer) ---
-            if priority < 90000 and not is_capture and depth <= 2 and depth < original_depth:
+            #futility pruning
+            if not is_in_check and priority < 90000 and not is_capture and depth <= 2 and depth < original_depth:
                 if static_eval + FUTILITY_MARGIN * depth < alpha:
                     continue
 
-                    # SSE Check
+            #SSE pruning (using new SSE func)
             if is_capture:
-                net_gain = static_exchange_eval_local(game, end, game.board[start[0]][start[1]].colour, move_cache)
-                if net_gain < -50: continue
+                net_gain = static_exchange_eval_local(game, start, end, move_cache)
+                if net_gain < 0: continue
 
             copy = game.light_copy()
             copy.make_move(start, end, promotion)
 
-            eval_score = minimax_sse(copy, depth - 1, alpha, beta, False, original_depth, move_cache.copy(),
-                                     start_time=start_time, time_limit=time_limit,
-                                     principal_variation=principal_variation)
+            # --- LMR (Late Move Reductions) ---
+            reduction = 0
+            if depth >= 3 and move_index >= 3 and not is_capture and not is_in_check and priority < 8000:
+                reduction = 1
 
-            if eval_score is None: return None
+            eval_score = None  # Initialize
+
+            # --- PVS (Principal Variation Search) ---
+            if move_index == 0:  # PVS: Full window search for the first move
+                eval_score = minimax_sse(copy, depth - 1, alpha, beta, False, original_depth,
+                                         start_time=start_time, time_limit=time_limit,
+                                         principal_variation=principal_variation)
+            else:
+                # PVS: Zero-window search for subsequent moves (with LMR applied)
+                eval_score = minimax_sse(copy, depth - 1 - reduction, alpha, alpha + 1, False, original_depth,
+                                         start_time=start_time, time_limit=time_limit,
+                                         principal_variation=principal_variation)
+
+
+                if eval_score is None:
+                    return None
+
+                    # PVS: If the zero-window search failed high, re-search with the full window
+                if eval_score > alpha and eval_score < beta:
+                    # Re-search at full depth (no reduction)
+                    eval_score = minimax_sse(copy, depth - 1, alpha, beta, False, original_depth,
+                                             start_time=start_time, time_limit=time_limit,
+                                             principal_variation=principal_variation)
+
+            move_index += 1  # Increment move counter
+
+
+            if eval_score is None:
+                return None
 
             if eval_score > max_eval:
                 max_eval = eval_score
@@ -616,44 +718,73 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None, move_
             alpha = max(alpha, eval_score)
             if beta <= alpha:
                 max_eval = beta
-
-                # --- HEURISTIC UPDATE (Beta-Cutoff) ---
                 if not is_capture:
                     KILLER_MOVES[ply][1] = KILLER_MOVES[ply][0]
                     KILLER_MOVES[ply][0] = (start, end, promotion)
                     start_idx = start[0] * 8 + start[1]
                     end_idx = end[0] * 8 + end[1]
                     HISTORY_MOVES[start_idx][end_idx] += depth * depth
-
                 break
         score = max_eval
 
     else:  # Minimizing
         min_eval = float('inf')
+        # Pass local cache to eval
         static_eval = evaluate_board(game, move_cache)
+
+        move_index = 0  # For PVS/LMR
 
         for priority, start, end, promotion in all_moves:
 
             is_capture = game.board[end[0]][end[1]]
 
-            # --- Futility Pruning for Non-Captures (Only if not PV/TT/Killer) ---
-            if priority < 90000 and not is_capture and depth <= 2 and depth < original_depth:
+            # futility pruning
+            if not is_in_check and priority < 90000 and not is_capture and depth <= 2 and depth < original_depth:
                 if static_eval - FUTILITY_MARGIN * depth > beta:
                     continue
 
-                    # SSE Check
+            #SSE pruning
             if is_capture:
-                net_gain = static_exchange_eval_local(game, end, game.board[start[0]][start[1]].colour, move_cache)
-                if net_gain < -50: continue
+                net_gain = static_exchange_eval_local(game, start, end, move_cache)
+                if net_gain < 0: continue
 
             copy = game.light_copy()
             copy.make_move(start, end, promotion)
 
-            eval_score = minimax_sse(copy, depth - 1, alpha, beta, True, original_depth, move_cache.copy(),
-                                     start_time=start_time, time_limit=time_limit,
-                                     principal_variation=principal_variation)
+            # --- LMR (Late Move Reductions) ---
+            reduction = 0
+            if depth >= 3 and move_index >= 3 and not is_capture and not is_in_check and priority < 8000:
+                reduction = 1
 
-            if eval_score is None: return None
+            eval_score = None  # Initialize
+
+            # --- PVS (Principal Variation Search) ---
+            if move_index == 0:  # PVS: Full window search
+                eval_score = minimax_sse(copy, depth - 1, alpha, beta, True, original_depth,
+                                         start_time=start_time, time_limit=time_limit,
+                                         principal_variation=principal_variation)
+            else:
+                # PVS: Zero-window search
+                eval_score = minimax_sse(copy, depth - 1 - reduction, beta - 1, beta, True, original_depth,
+                                         start_time=start_time, time_limit=time_limit,
+                                         principal_variation=principal_variation)
+
+                # --- FIX 3: CHECK FOR TIMEOUT (None) *BEFORE* COMPARE ---
+                if eval_score is None:
+                    return None
+
+                # PVS: Re-search if failed high (low for minimizing)
+                if eval_score < beta and eval_score > alpha:
+                    # Re-search at full depth (no reduction)
+                    eval_score = minimax_sse(copy, depth - 1, alpha, beta, True, original_depth,
+                                             start_time=start_time, time_limit=time_limit,
+                                             principal_variation=principal_variation)
+
+            move_index += 1  # Increment move counter
+
+            # --- FIX 4: CHECK FOR TIMEOUT (None) *AFTER* ALL CALLS ---
+            if eval_score is None:
+                return None
 
             if eval_score < min_eval:
                 min_eval = eval_score
@@ -661,15 +792,12 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None, move_
             beta = min(beta, eval_score)
             if beta <= alpha:
                 min_eval = alpha
-
-                # --- HEURISTIC UPDATE (Alpha-Cutoff) ---
                 if not is_capture:
                     KILLER_MOVES[ply][1] = KILLER_MOVES[ply][0]
                     KILLER_MOVES[ply][0] = (start, end, promotion)
                     start_idx = start[0] * 8 + start[1]
                     end_idx = end[0] * 8 + end[1]
                     HISTORY_MOVES[start_idx][end_idx] += depth * depth
-
                 break
         score = min_eval
 

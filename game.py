@@ -16,6 +16,9 @@ class Game:
         self.state = None
         self.castling = {'wKR': True, 'wQR': True, 'bKR': True, 'bQR': True}
 
+        self.w_king_pos = (7, 4)
+        self.b_king_pos = (0, 4)
+
         self.move_clock = 0
         self.position_count = {}
         self.position_count[self.board_key()] = 1
@@ -41,29 +44,31 @@ class Game:
 
     def castling_moves(self, king, row, col):
         moves = []
-        if king.colour == 'w' and row == 7 and col == 4:
+        if king.colour == 'w':
+            if row != 7 or col != 4: return []
             if self.castling['wKR'] and self.board[7][5] is None and self.board[7][6] is None:
                 if not self.square_attacked((7, 4), 'b') and not self.square_attacked((7, 5),
                                                                                       'b') and not self.square_attacked(
-                        (7, 6), 'b'):
+                    (7, 6), 'b'):
                     moves.append((7, 6))
             if self.castling['wQR'] and self.board[7][3] is None and self.board[7][2] is None and self.board[7][
                 1] is None:
                 if not self.square_attacked((7, 4), 'b') and not self.square_attacked((7, 3),
                                                                                       'b') and not self.square_attacked(
-                        (7, 2), 'b'):
+                    (7, 2), 'b'):
                     moves.append((7, 2))
-        elif king.colour == 'b' and row == 0 and col == 4:
+        elif king.colour == 'b':
+            if row != 0 or col != 4: return []
             if self.castling['bKR'] and self.board[0][5] is None and self.board[0][6] is None:
                 if not self.square_attacked((0, 4), 'w') and not self.square_attacked((0, 5),
                                                                                       'w') and not self.square_attacked(
-                        (0, 6), 'w'):
+                    (0, 6), 'w'):
                     moves.append((0, 6))
             if self.castling['bQR'] and self.board[0][3] is None and self.board[0][2] is None and self.board[0][
                 1] is None:
                 if not self.square_attacked((0, 4), 'w') and not self.square_attacked((0, 3),
                                                                                       'w') and not self.square_attacked(
-                        (0, 2), 'w'):
+                    (0, 2), 'w'):
                     moves.append((0, 2))
         return moves
 
@@ -90,7 +95,6 @@ class Game:
             return king_moves(self.board, row, col)
         return []
 
-    # --- MODIFIED: Uses fast move/unmake system ---
     def get_moves(self, row, col):
         piece = self.board[row][col]
         if not piece or piece.colour != self.turn: return []
@@ -98,20 +102,24 @@ class Game:
         moves = self.pseudo_moves(row, col)
         legal_moves = []
 
+        king_pos_to_check = self.w_king_pos if piece.colour == 'w' else self.b_king_pos
+
         for r, c in moves:
-            # Store move details *before* forcing the move (for unmake)
             move_details = self.force_move_and_save((row, col), (r, c))
 
-            # Check for legality: A move is legal if the king is NOT in check after the move
-            if not self.is_check(piece.colour):
+            if piece.name == 'K':
+                king_pos_to_check = (r, c)
+
+            if not self.square_attacked(king_pos_to_check, 'b' if piece.colour == 'w' else 'w'):
                 legal_moves.append((r, c))
 
-            # Unmake the move (restore the board state)
             self.unmake_move((row, col), (r, c), move_details)
+
+            if piece.name == 'K':
+                king_pos_to_check = (row, col)
 
         return legal_moves
 
-    # --- NEW: force_move_and_save (For internal use in get_moves) ---
     def force_move_and_save(self, start, end, promotion='Q'):
         r1, c1 = start;
         r2, c2 = end
@@ -122,6 +130,9 @@ class Game:
         captured = self.board[r2][c2]
         captured_pos = None
 
+        old_w_king = self.w_king_pos
+        old_b_king = self.b_king_pos
+
         if piece.name == 'P' and self.enpassant and end == self.enpassant:
             captured_pos = (r2 + 1, c2) if piece.colour == 'w' else (r2 - 1, c2)
             captured = self.board[captured_pos[0]][captured_pos[1]]
@@ -129,6 +140,12 @@ class Game:
 
         self.board[r2][c2] = piece
         self.board[r1][c1] = None
+
+        if piece.name == 'K':
+            if piece.colour == 'w':
+                self.w_king_pos = (r2, c2)
+            else:
+                self.b_king_pos = (r2, c2)
 
         if piece.name == 'K' and abs(c2 - c1) == 2:
             if c2 == 6:  # Kingside
@@ -154,9 +171,11 @@ class Game:
 
         if piece.name == 'K':
             if piece.colour == 'w':
-                self.castling['wKR'] = False; self.castling['wQR'] = False
+                self.castling['wKR'] = False;
+                self.castling['wQR'] = False
             else:
-                self.castling['bKR'] = False; self.castling['bQR'] = False
+                self.castling['bKR'] = False;
+                self.castling['bQR'] = False
         elif piece.name == 'R':
             if piece.colour == 'w':
                 if (r1, c1) == (7, 0):
@@ -174,11 +193,12 @@ class Game:
             new_enpassant = ((r1 + r2) // 2, c1)
         self.enpassant = new_enpassant
 
-        return (piece, captured, captured_pos, rook_move, promoted_to, old_enpassant, old_castling)
+        return (piece, captured, captured_pos, rook_move, promoted_to, old_enpassant, old_castling, old_w_king,
+                old_b_king)
 
-    # --- NEW: unmake_move (Restores state to pre-move quickly) ---
     def unmake_move(self, start, end, move_details):
-        (piece, captured, captured_pos, rook_move, promoted_to, old_enpassant, old_castling) = move_details
+        (piece, captured, captured_pos, rook_move, promoted_to, old_enpassant, old_castling, old_w_king,
+         old_b_king) = move_details
         r1, c1 = start;
         r2, c2 = end
 
@@ -197,7 +217,9 @@ class Game:
         self.enpassant = old_enpassant
         self.castling = old_castling
 
-    # --- MODIFIED: Master move executor (updated to be robust) ---
+        self.w_king_pos = old_w_king
+        self.b_king_pos = old_b_king
+
     def _force_move(self, start, end, promotion='Q'):
         r1, c1 = start;
         r2, c2 = end;
@@ -210,6 +232,9 @@ class Game:
         old_move_clock = self.move_clock
         old_turn = self.turn
 
+        old_w_king = self.w_king_pos
+        old_b_king = self.b_king_pos
+
         captured = self.board[r2][c2];
         captured_pos = None
         if piece.name == 'P' and self.enpassant and end == self.enpassant:
@@ -219,6 +244,12 @@ class Game:
 
         self.board[r2][c2] = piece;
         self.board[r1][c1] = None
+
+        if piece.name == 'K':
+            if piece.colour == 'w':
+                self.w_king_pos = (r2, c2)
+            else:
+                self.b_king_pos = (r2, c2)
 
         rook_move = None
         if piece.name == 'K' and abs(c2 - c1) == 2:
@@ -241,9 +272,11 @@ class Game:
 
         if piece.name == 'K':
             if piece.colour == 'w':
-                self.castling['wKR'] = False; self.castling['wQR'] = False
+                self.castling['wKR'] = False;
+                self.castling['wQR'] = False
             else:
-                self.castling['bKR'] = False; self.castling['bQR'] = False
+                self.castling['bKR'] = False;
+                self.castling['bQR'] = False
         elif piece.name == 'R':
             if piece.colour == 'w':
                 if (r1, c1) == (7, 0):
@@ -261,7 +294,7 @@ class Game:
         self.enpassant = new_enpassant
 
         return (piece, captured, captured_pos, rook_move, promoted_to, old_enpassant, old_castling, old_move_clock,
-                old_turn)
+                old_turn, old_w_king, old_b_king)
 
     def make_move(self, start, end, promotion='Q'):
         if start is None or end is None: return False
@@ -274,10 +307,10 @@ class Game:
 
         move_details = self._force_move(start, end, promotion)
         (moved_piece, captured_piece, captured_pos, rook_move, promoted_to, old_enpassant, old_castling, old_move_clock,
-         old_turn) = move_details
+         old_turn, old_w_king, old_b_king) = move_details
 
         history_entry = (start, end, moved_piece, captured_piece, captured_pos, rook_move, promoted_to,
-                         old_enpassant, old_castling, old_move_clock, old_turn)
+                         old_enpassant, old_castling, old_move_clock, old_turn, old_w_king, old_b_king)
         self.history.append(history_entry)
 
         self.turn = 'b' if self.turn == 'w' else 'w'
@@ -308,7 +341,8 @@ class Game:
     def full_unmake_move(self):
         if not self.history: return False
         (start, end, piece, captured, captured_pos, rook_move, promoted_to,
-         old_enpassant, old_castling, old_move_clock, old_turn) = self.history.pop()
+         old_enpassant, old_castling, old_move_clock, old_turn,
+         old_w_king, old_b_king) = self.history.pop()
 
         r1, c1 = start;
         r2, c2 = end
@@ -333,6 +367,9 @@ class Game:
         self.turn = old_turn
         if self.turn == 'b': self.move_count -= 1
 
+        self.w_king_pos = old_w_king
+        self.b_king_pos = old_b_king
+
         key = self.board_key()
         self.position_count[key] -= 1
         if self.position_count[key] == 0: del self.position_count[key]
@@ -350,15 +387,7 @@ class Game:
         return False
 
     def is_check(self, colour):
-        king_pos = None
-        for r in range(8):
-            for c in range(8):
-                piece = self.board[r][c]
-                if piece and piece.name == 'K' and piece.colour == colour:
-                    king_pos = (r, c);
-                    break
-            if king_pos: break
-        if not king_pos: return False
+        king_pos = self.w_king_pos if colour == 'w' else self.b_king_pos
         return self.square_attacked(king_pos, 'b' if colour == 'w' else 'w')
 
     def is_checkmate(self, colour):
@@ -391,6 +420,10 @@ class Game:
         copy.move_count = self.move_count
         copy.move_clock = self.move_clock
         copy.state = self.state
+        copy.w_king_pos = self.w_king_pos
+        copy.b_king_pos = self.b_king_pos
+        copy.position_count = self.position_count.copy()
+
         return copy
 
     def board_key(self):
