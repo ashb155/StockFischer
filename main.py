@@ -1,21 +1,16 @@
-# File: main.py
-# (Updated to use the extensive opening book)
 
 from game import Game, move_to_algebraic
 from board import print_board
 from parser import parser
 import os
-from ai import minimax_sse, calculate_zobrist_hash  # Import hash function
+from ai import minimax_sse, calculate_zobrist_hash
 import time
 
-# --- THIS IS THE ONLY CHANGE ---
-from opening_book import get_book_move  # Use our new, powerful book
+from opening_book import get_book_move
 
-
-# --------------------------------
 
 def refresh():
-    os.system('cls' if os.name == 'nt' else 'clear')  # for terminal
+    os.system('cls' if os.name == 'nt' else 'clear')
 
 
 # --- Search Depth Mapping ---
