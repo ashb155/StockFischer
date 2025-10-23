@@ -352,6 +352,7 @@ def evaluate_board(game, move_cache=None):
     if black_bishops >= 2: score -= 50
 
     def king_safety(game, colour, move_cache):
+        attack_weights = {'Q': 10, 'R': 5, 'B': 3, 'N': 3, 'P': 1, 'K': 0}
         kingr, kingc = None, None
         for r in range(8):
             for c in range(8):
@@ -361,7 +362,7 @@ def evaluate_board(game, move_cache=None):
                     break
             if kingr is not None: break
 
-        if kingr is None: return 0  # Failsafe
+        if kingr is None: return 0
 
         danger = 0
         for dr in [-1, 0, 1]:
@@ -375,7 +376,7 @@ def evaluate_board(game, move_cache=None):
                             if piece2 and piece2.colour != colour:
                                 attacker_moves = move_cache.get((r1, c1), [])
                                 if (nr, nc) in attacker_moves:
-                                    danger += 1
+                                    danger += attack_weights.get(piece2.name, 0)
 
         shield_bonus = 0
         directions = -1 if colour == 'w' else 1
