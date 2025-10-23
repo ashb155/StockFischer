@@ -27,7 +27,8 @@ TT = {}
 TT_MAX_SIZE = 500000
 
 # --- PIECE VALUES AND TABLES ---
-piece_values = {'P': 100, 'N': 320, 'B': 330, 'R': 500, 'Q': 900, 'K': 20000}
+piece_values = {'P': 100, 'N': 320, 'B': 330, 'R'
+: 500, 'Q': 900, 'K': 20000}
 PHASE_MATERIAL = {'Q': 4, 'R': 2, 'B': 1, 'N': 1}
 MAX_PHASE_MATERIAL = sum(PHASE_MATERIAL.values()) * 2
 
