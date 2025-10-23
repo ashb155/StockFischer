@@ -166,7 +166,8 @@ class Game:
         promoted_to = None
         if piece.name == 'P':
             if (piece.colour == 'w' and r2 == 0) or (piece.colour == 'b' and r2 == 7):
-                self.board[r2][c2] = Piece(piece.colour, promotion)
+                promo_piece_name = promotion if promotion is not None else 'Q'
+                self.board[r2][c2] = Piece(piece.colour, promo_piece_name)
                 promoted_to = self.board[r2][c2]
 
         if piece.name == 'K':

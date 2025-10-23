@@ -4,6 +4,7 @@ import os
 
 BOOK_FILE = 'book.pkl'
 BOOK = {}
+random.seed()
 
 def load_book():
     global BOOK

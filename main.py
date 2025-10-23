@@ -30,7 +30,6 @@ colour = input('Choose colour - W / B').strip().lower()
 game = Game()
 while True:
     refresh()
-    # Updated title to show the book is loaded
     print("\nStockFischer 2.0 (PVS/LMR + Ext. Book)")
     print_board(game.board)
 
