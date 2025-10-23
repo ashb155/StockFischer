@@ -133,6 +133,20 @@ class Game:
         old_w_king = self.w_king_pos
         old_b_king = self.b_king_pos
 
+        # --- FIX 1 (Castling): Check captured piece ---
+        if captured and captured.name == 'R':
+            if captured.colour == 'w':
+                if (r2, c2) == (7, 0):
+                    self.castling['wQR'] = False
+                elif (r2, c2) == (7, 7):
+                    self.castling['wKR'] = False
+            else:  # 'b'
+                if (r2, c2) == (0, 0):
+                    self.castling['bQR'] = False
+                elif (r2, c2) == (0, 7):
+                    self.castling['bKR'] = False
+        # --- END OF FIX ---
+
         if piece.name == 'P' and self.enpassant and end == self.enpassant:
             captured_pos = (r2 + 1, c2) if piece.colour == 'w' else (r2 - 1, c2)
             captured = self.board[captured_pos[0]][captured_pos[1]]
@@ -189,10 +203,26 @@ class Game:
                 elif (r1, c1) == (0, 7):
                     self.castling['bKR'] = False
 
+        # --- UPDATED EN PASSANT LOGIC ---
         new_enpassant = None
         if piece.name == 'P' and abs(r2 - r1) == 2:
-            new_enpassant = ((r1 + r2) // 2, c1)
+            # This is the potential target square (e.g., d3)
+            ep_target_square = ((r1 + r2) // 2, c1)
+
+            # Check for enemy pawns on adjacent files *at the destination rank* (e.g., c4 or e4)
+            for dc in [-1, 1]:
+                check_c = c1 + dc
+                if 0 <= check_c < 8:
+                    # r2 is the destination rank (e.g., rank 4)
+                    enemy_pawn = self.board[r2][check_c]
+                    if (enemy_pawn and
+                            enemy_pawn.name == 'P' and
+                            enemy_pawn.colour != piece.colour):
+                        # Found a pawn that can capture, so the EP square is valid
+                        new_enpassant = ep_target_square
+                        break  # No need to check the other side
         self.enpassant = new_enpassant
+
 
         return (piece, captured, captured_pos, rook_move, promoted_to, old_enpassant, old_castling, old_w_king,
                 old_b_king)
@@ -238,6 +268,19 @@ class Game:
 
         captured = self.board[r2][c2];
         captured_pos = None
+
+        if captured and captured.name == 'R':
+            if captured.colour == 'w':
+                if (r2, c2) == (7, 0):
+                    self.castling['wQR'] = False
+                elif (r2, c2) == (7, 7):
+                    self.castling['wKR'] = False
+            else:  # 'b'
+                if (r2, c2) == (0, 0):
+                    self.castling['bQR'] = False
+                elif (r2, c2) == (0, 7):
+                    self.castling['bKR'] = False
+
         if piece.name == 'P' and self.enpassant and end == self.enpassant:
             captured_pos = (r2 + 1, c2) if piece.colour == 'w' else (r2 - 1, c2)
             captured = self.board[captured_pos[0]][captured_pos[1]]
@@ -291,7 +334,21 @@ class Game:
                     self.castling['bKR'] = False
 
         new_enpassant = None
-        if piece.name == 'P' and abs(r2 - r1) == 2: new_enpassant = ((r1 + r2) // 2, c1)
+        if piece.name == 'P' and abs(r2 - r1) == 2:
+            ep_target_square = ((r1 + r2) // 2, c1)
+
+            # Check for enemy pawns on adjacent files *at the destination rank* (e.g., c4 or e4)
+            for dc in [-1, 1]:
+                check_c = c1 + dc
+                if 0 <= check_c < 8:
+                    # r2 is the destination rank (e.g., rank 4)
+                    enemy_pawn = self.board[r2][check_c]
+                    if (enemy_pawn and
+                            enemy_pawn.name == 'P' and
+                            enemy_pawn.colour != piece.colour):
+                        # Found a pawn that can capture, so the EP square is valid
+                        new_enpassant = ep_target_square
+                        break  # No need to check the other side
         self.enpassant = new_enpassant
 
         return (piece, captured, captured_pos, rook_move, promoted_to, old_enpassant, old_castling, old_move_clock,

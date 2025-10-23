@@ -47,7 +47,7 @@ def your_board_to_chess_board(game_instance):
 
 
     board.halfmove_clock = game_instance.move_clock
-    board.fullmove_number = (game_instance.move_count // 2) + 1
+    board.fullmove_number = game_instance.move_count + 1
 
 
     return board
@@ -115,7 +115,6 @@ def get_polyglot_book_move(game_instance):
     except KeyError:
         return None
     except Exception as e:
-        # Catch potential errors during lookup or conversion
         print(f"Error during Polyglot lookup/conversion: {e}")
         return None
 

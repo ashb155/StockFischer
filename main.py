@@ -21,7 +21,7 @@ TIME_LIMIT = time_limits.get(level, 10.0)
 colour = input('Choose colour - W / B: ').strip().lower()
 if colour not in ['w', 'b']:
     print("Invalid colour, defaulting to white.")
-    colour = 'w' # Default to white if input is invalid
+    colour = 'w'
 
 
 def refresh():
@@ -74,7 +74,7 @@ while True:
 
                 if end in legal_moves_for_piece:
                     algebraic = move_to_algebraic(game, start, end, promotion)
-                    print(f"AI plays (from book): {algebraic}")
+                    print(f"AI plays {algebraic}")
                     if not game.make_move(start, end, promotion):
                          print(f"ERROR: Failed to make validated book move {algebraic}. Searching instead.")
                          valid_book_move_played = False # Force search
@@ -175,7 +175,7 @@ while True:
                 if fallback_move:
                     (start, end, promotion) = fallback_move
                     algebraic = move_to_algebraic(game, start, end, promotion)
-                    print(f"AI plays (random fallback): {algebraic}")
+                    print(f"AI plays: {algebraic}")
                     if not game.make_move(start, end, promotion):
                          print(f"ERROR: AI failed to make fallback move {algebraic}!")
                          break

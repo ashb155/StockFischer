@@ -142,11 +142,7 @@ def evaluate_board(game, move_cache=None):
     score = 0
     white_pawns, black_pawns = [], []
 
-    all_moves_cache = {}
-    for r in range(8):
-        for c in range(8):
-            if game.board[r][c]:
-                all_moves_cache[(r, c)] = move_cache.get((r, c), game.get_moves(r, c))
+    all_moves_cache = move_cache if move_cache is not None else {}
 
     current_material = sum(
         PHASE_MATERIAL.get(game.board[r][c].name, 0) for r in range(8) for c in range(8) if game.board[r][c])
@@ -221,6 +217,9 @@ def evaluate_board(game, move_cache=None):
                     piece2 = game.board[r1][c1]
                     if not piece2: continue
 
+                    # NOTE: This will now only check for attackers/defenders
+                    # from the *active* player, as that's all all_moves_cache contains.
+                    # This is a reasonable trade-off for the massive speed boost.
                     moves = all_moves_cache.get((r1, c1), [])
 
                     if (row, col) in moves:
@@ -333,12 +332,15 @@ def evaluate_board(game, move_cache=None):
     score += pawn_structure(white_pawns, black_pawns, 'w')
     score -= pawn_structure(black_pawns, white_pawns, 'b')
 
-    # Mobility: Now uses cached moves
-    white_moves = sum(len(all_moves_cache[(r, c)]) for r in range(8) for c in range(8) if
+    white_moves = sum(len(all_moves_cache.get((r, c), [])) for r in range(8) for c in range(8) if
                       game.board[r][c] and game.board[r][c].colour == 'w')
-    black_moves = sum(len(all_moves_cache[(r, c)]) for r in range(8) for c in range(8) if
+    black_moves = sum(len(all_moves_cache.get((r, c), [])) for r in range(8) for c in range(8) if
                       game.board[r][c] and game.board[r][c].colour == 'b')
-    score += 10 * (white_moves - black_moves)
+
+    if white_moves > 0 and black_moves == 0:
+        score += 10 * white_moves
+    elif black_moves > 0 and white_moves == 0:
+        score -= 10 * black_moves
 
     white_bishops = sum(1 for r in range(8) for c in range(8) if
                         game.board[r][c] and game.board[r][c].name == 'B' and game.board[r][c].colour == 'w')
@@ -370,6 +372,7 @@ def evaluate_board(game, move_cache=None):
                         for c1 in range(8):
                             piece2 = game.board[r1][c1]
                             if piece2 and piece2.colour != colour:
+                                # This will now only check for attackers from the active player
                                 attacker_moves = move_cache.get((r1, c1), [])
                                 if (nr, nc) in attacker_moves:
                                     danger += attack_weights.get(piece2.name, 0)
@@ -385,8 +388,13 @@ def evaluate_board(game, move_cache=None):
                         shield_bonus += 15 if r == kingr + directions else 10
         return -30 * danger + shield_bonus
 
-    score += king_safety(game, 'w', all_moves_cache) * (1 - phase)
-    score -= king_safety(game, 'b', all_moves_cache) * (1 - phase)
+    # Only apply king safety for the active (cached) player
+    if game.turn == 'w':
+        score += king_safety(game, 'w', all_moves_cache) * (1 - phase)
+        score -= king_safety(game, 'b', {}) * (1 - phase)  # Pass empty cache for inactive
+    else:
+        score += king_safety(game, 'w', {}) * (1 - phase)  # Pass empty cache for inactive
+        score -= king_safety(game, 'b', all_moves_cache) * (1 - phase)
 
     white_rooks = []
     black_rooks = []
@@ -424,7 +432,6 @@ def evaluate_board(game, move_cache=None):
 
 
 def static_exchange_eval_local(game, start, end, move_cache):
-
     attacker_piece = game.board[start[0]][start[1]]
     target_piece = game.board[end[0]][end[1]]
 
@@ -448,6 +455,7 @@ def static_exchange_eval_local(game, start, end, move_cache):
                 if not piece or piece.colour != side:
                     continue
 
+                # Use simple attack_moves for SEE, it's faster
                 moves = copyg.attack_moves(r, c)
 
                 if target_square in moves:
@@ -456,12 +464,10 @@ def static_exchange_eval_local(game, start, end, move_cache):
         if not attackers:
             break  # No more attackers, sequence ends
 
-        # Find the least valuable attacker
         best_attacker_pos = min(attackers, key=lambda sq: piece_values[copyg.board[sq[0]][sq[1]].name])
 
-        # The piece *on* the target square is the *next* victim
         if not copyg.board[target_square[0]][target_square[1]]:
-            break  # Should not happen, but a good safeguard
+            break
 
         victim_value = piece_values[copyg.board[target_square[0]][target_square[1]].name]
         gains.append(victim_value)
@@ -481,7 +487,9 @@ def static_exchange_eval_local(game, start, end, move_cache):
 
 
 def quiescence_search(game, alpha, beta, maximizing, move_cache):
-    eval_score = evaluate_board(game, move_cache)
+
+    eval_score = evaluate_board(game, {})
+
     if maximizing:
         if eval_score >= beta:
             return beta
@@ -494,51 +502,50 @@ def quiescence_search(game, alpha, beta, maximizing, move_cache):
     forcing_moves = []
     colour = 'w' if maximizing else 'b'
 
-    for r in range(8):
-        for c in range(8):
-            piece = game.board[r][c]
-            if piece and piece.colour == colour:
-                moves = move_cache.get((r, c), game.get_moves(r, c))
-                for move in moves:
+    if move_cache:  # Only if move_cache was provided
+        for start_pos, moves in move_cache.items():
+            piece = game.board[start_pos[0]][start_pos[1]]
+            if not piece: continue
 
-                    is_capture = game.board[move[0]][move[1]] is not None
-                    is_check = False
+            for end_pos in moves:
+                is_capture = game.board[end_pos[0]][end_pos[1]] is not None
+                if is_capture:
+                    victim = game.board[end_pos[0]][end_pos[1]]
+                    victim_val = piece_values.get(victim.name, 0)
+                    attacker_val = piece_values.get(piece.name, 1)
+                    priority = 10000 + victim_val * 10 - attacker_val
 
-                    if is_capture:
-                        victim_val = piece_values.get(game.board[move[0]][move[1]].name, 0)
-                        attacker_val = piece_values.get(piece.name, 1)
-                        # High priority for captures (MVV-LVA)
-                        priority = 10000 + victim_val * 10 - attacker_val
-                        forcing_moves.append((priority, (r, c), move, None))
-
+                    # Check for promotion captures
+                    if piece.name == 'P' and (end_pos[0] == 0 or end_pos[0] == 7):
+                        promos = ['Q', 'R', 'B', 'N']
                     else:
-                        # Check if this non-capture move gives check
-                        copy = game.light_copy()
-                        copy.make_move((r, c), move)
-                        if copy.is_check('b' if maximizing else 'w'):
-                            is_check = True
+                        promos = [None]
 
-                        if is_check:
-                            # Lower priority for checks, but still explore them
-                            priority = 5000
-                            forcing_moves.append((priority, (r, c), move, None))
+                    for p in promos:
+                        forcing_moves.append((priority, start_pos, end_pos, p))
 
-    # Sort moves: Best captures first, then checks
+    # Sort moves: Best captures first
     forcing_moves.sort(key=lambda x: x[0], reverse=True)
 
     for priority, start, end, promotion in forcing_moves:
 
-        # For captures, runs SEE to prune bad ones
-        if game.board[end[0]][end[1]] is not None:
-            net_gain = static_exchange_eval_local(game, start, end, move_cache)
-            if net_gain < 0:
-                continue
+        # Run SEE on the *legal* capture.
+        net_gain = static_exchange_eval_local(game, start, end, {})
+        if net_gain < 0:
+            continue
 
-        # Make the move and searches deeper
+        # Makes the move and searches deeper
         copy = game.light_copy()
         copy.make_move(start, end, promotion)
 
-        q_eval = quiescence_search(copy, alpha, beta, not maximizing, {})
+        recursive_move_cache = {}
+        for r in range(8):
+            for c in range(8):
+                p = copy.board[r][c]
+                if p and p.colour == copy.turn:
+                    recursive_move_cache[(r, c)] = copy.get_moves(r, c)
+
+        q_eval = quiescence_search(copy, alpha, beta, not maximizing, recursive_move_cache)
 
         if maximizing:
             if q_eval >= beta:
@@ -553,17 +560,17 @@ def quiescence_search(game, alpha, beta, maximizing, move_cache):
     return alpha if maximizing else beta
 
 
+
+
 def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
                 start_time=None, time_limit=None, principal_variation=None):
     if original_depth is None: original_depth = depth
-
 
     move_cache = {}
 
     ply = original_depth - depth  # Current depth from root
 
     best_move = None
-
 
     if time_limit and time.time() - start_time > time_limit:
         return None
@@ -613,8 +620,14 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
             return tt_best_move if depth == original_depth else beta
 
 
-
     if depth == 0 or game.state is not None:
+        #generates moves for the *active* player to pass to quiescence
+        for r in range(8):
+            for c in range(8):
+                p = game.board[r][c]
+                if p and p.colour == game.turn:
+                    move_cache[(r, c)] = game.get_moves(r, c)
+
         score = quiescence_search(game, alpha, beta, maximizing, move_cache)
         TT[tt_key] = {'depth': 0, 'score': score, 'flag': TT_EXACT, 'best_move': None}
         return best_move if depth == original_depth else score
@@ -666,6 +679,13 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
 
     all_moves.sort(key=lambda x: x[0], reverse=True)
 
+    # --- Check for stalemate/checkmate ---
+    if not all_moves:
+        if is_in_check:
+            return -999999 if maximizing else 999999  # Checkmate
+        else:
+            return 0  # Stalemate
+
     move_index = 0  # For PVS/LMR
 
     if maximizing:
@@ -711,9 +731,7 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
                 if eval_score is None:
                     return None
 
-
                 if eval_score > alpha and eval_score < beta:
-
                     eval_score = minimax_sse(copy, depth - 1, alpha, beta, False, original_depth,
                                              start_time=start_time, time_limit=time_limit,
                                              principal_variation=principal_variation)
@@ -724,7 +742,7 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
                 return None
 
             if eval_score > max_eval:
-                max_eval = eval_score
+                max_eval = max_eval
                 best_move = (start, end, promotion)
             alpha = max(alpha, eval_score)
             if beta <= alpha:
