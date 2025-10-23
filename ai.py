@@ -1,6 +1,3 @@
-# File: ai.py
-# (Contains the fix for the TypeError)
-
 import time
 import random
 
@@ -8,7 +5,6 @@ import random
 FUTILITY_MARGIN = 100
 
 # --- HEURISTIC TABLES ---
-# Killer Moves: Stores two killer moves for each ply (depth) up to 64
 KILLER_MOVES = [[None, None] for _ in range(64)]
 # History Moves: Stores a score for every possible start->end square move (64x64)
 HISTORY_MOVES = [[0 for _ in range(64)] for _ in range(64)]
