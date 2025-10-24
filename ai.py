@@ -28,10 +28,15 @@ TT = {}
 TT_MAX_SIZE = 500000
 
 # --- PIECE VALUES AND TABLES ---
-piece_values = {'P': 100, 'N': 320, 'B': 330, 'R'
-: 500, 'Q': 900, 'K': 20000}
+piece_values = {'P': 100, 'N': 320, 'B': 330, 'R': 500, 'Q': 900, 'K': 20000}
 PHASE_MATERIAL = {'Q': 4, 'R': 2, 'B': 1, 'N': 1}
 MAX_PHASE_MATERIAL = sum(PHASE_MATERIAL.values()) * 2
+
+# --- IMPROVED EVALUATION CONSTANTS ---
+MOBILITY_BONUS = 2  # Bonus per legal move
+CENTER_CONTROL_BONUS = 15  # Bonus for controlling center squares
+DEVELOPMENT_BONUS = 20  # Bonus for developing pieces early
+TEMPO_BONUS = 10  # Bonus for maintaining tempo
 
 # King attack weights for king safety/attack
 king_attack_weights = {'Q': 5, 'R': 3, 'B': 2, 'N': 2, 'P': 1}
@@ -55,7 +60,7 @@ knight_table = [
     -30, 0, 10, 15, 15, 10, 0, -30,
     -30, 5, 15, 20, 20, 15, 5, -30,
     -30, 0, 15, 20, 20, 15, 0, -30,
-    -50, 5, 10, 15, 15, 10, 5, -50,
+    -30, 5, 10, 15, 15, 10, 5, -30,
     -40, -20, 0, 5, 5, 0, -20, -40,
     -50, -40, -30, -30, -30, -30, -40, -50
 ]
@@ -199,9 +204,8 @@ def evaluate_board(game, move_cache=None):
             elif piece.name == 'Q':
                 val += queen_table[index]
             elif piece.name == 'K':
-                mg_value = king_table[
-                    row * 8 + col]
-                eg_value = king_endgame_table[row * 8 + col]
+                mg_value = king_table[index]
+                eg_value = king_endgame_table[index]
                 val += int((1 - phase) * mg_value + phase * eg_value)
 
             if piece.name == 'N':  # Knight outpost
@@ -416,21 +420,38 @@ def evaluate_board(game, move_cache=None):
     score += pawn_structure(white_pawns, black_pawns, 'w')
     score -= pawn_structure(black_pawns, white_pawns, 'b')
 
-    # --- Safe Mobility Scoring ---
-    safe_mobility_bonus = 0
+    # --- Enhanced Mobility Scoring ---
+    white_mobility = 0
+    black_mobility = 0
+    
     if all_moves_cache:
         opponent_pawn_attacks = black_pawn_attacks if game.turn == 'w' else white_pawn_attacks
         for start_pos, moves in all_moves_cache.items():
             piece_mob = game.board[start_pos[0]][start_pos[1]]
+            if not piece_mob:
+                continue
+                
             mob_factor = 1.0
-            if piece_mob:
-                if piece_mob.name == 'P':
-                    mob_factor = 0.5
-                elif piece_mob.name == 'K':
-                    mob_factor = 0.7
+            if piece_mob.name == 'P':
+                mob_factor = 0.5
+            elif piece_mob.name == 'K':
+                mob_factor = 0.7
+            elif piece_mob.name == 'Q':
+                mob_factor = 1.2  # Queen mobility is very important
+            
+            safe_moves = 0
             for end_pos in moves:
-                if end_pos not in opponent_pawn_attacks: safe_mobility_bonus += mob_factor
-    score += int(safe_mobility_bonus * 3 * (1 if game.turn == 'w' else -1))
+                if end_pos not in opponent_pawn_attacks: 
+                    safe_moves += 1
+            
+            mobility_score = safe_moves * mob_factor * MOBILITY_BONUS
+            
+            if piece_mob.colour == 'w':
+                white_mobility += mobility_score
+            else:
+                black_mobility += mobility_score
+    
+    score += white_mobility - black_mobility
 
     # --- Bad Bishop Penalty ---
     white_pawns_on_light_central, white_pawns_on_dark_central = 0, 0
@@ -573,11 +594,19 @@ def evaluate_board(game, move_cache=None):
 
         score += undeveloped_penalty
 
-    # --- Central Control ---
+    # --- Enhanced Central Control ---
     central_squares = [(3, 3), (3, 4), (4, 3), (4, 4)]
+    extended_central_squares = [(2, 2), (2, 3), (2, 4), (2, 5), (3, 2), (3, 5), (4, 2), (4, 5), (5, 2), (5, 3), (5, 4), (5, 5)]
+    
     for r, c in central_squares:
         piece = game.board[r][c]
-        if piece: score += 10 * (1 if piece.colour == 'w' else -1)
+        if piece: 
+            score += CENTER_CONTROL_BONUS * (1 if piece.colour == 'w' else -1)
+    
+    for r, c in extended_central_squares:
+        piece = game.board[r][c]
+        if piece: 
+            score += (CENTER_CONTROL_BONUS // 2) * (1 if piece.colour == 'w' else -1)
 
     # --- King Stuck in Center Penalty ---
     if game.move_count > 10:  # Only after the opening
@@ -680,6 +709,16 @@ def evaluate_board(game, move_cache=None):
     initiative_score = king_zone_attack_count[1] - king_zone_attack_count[0]
     score += int(initiative_score * 3 * (1 - phase))
 
+    # --- Tempo Bonus ---
+    # Give a small bonus to the side to move (tempo)
+    score += TEMPO_BONUS * (1 if game.turn == 'w' else -1)
+    
+    # Bonus for having the initiative (more pieces attacking)
+    if king_zone_attack_count[0] > king_zone_attack_count[1]:
+        score += 20 * (1 - phase)  # More important in middlegame
+    elif king_zone_attack_count[1] > king_zone_attack_count[0]:
+        score -= 20 * (1 - phase)
+
     return score
 
 
@@ -734,7 +773,10 @@ def quiescence_search(game, alpha, beta, maximizing, move_cache):
             for c in range(8):
                 p = game.board[r][c]
                 if p and p.colour == colour:
-                    current_move_cache[(r, c)] = game.get_moves(r, c)
+                    try:
+                        current_move_cache[(r, c)] = game.get_moves(r, c)
+                    except Exception:
+                        current_move_cache[(r, c)] = []
 
     for start_pos, moves in current_move_cache.items():
         piece = game.board[start_pos[0]][start_pos[1]]
@@ -836,7 +878,8 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
                 alpha = max(alpha, tt_score)
             elif tt_flag == TT_BETA:
                 beta = min(beta, tt_score)
-            if alpha >= beta: return tt_best_move if depth == original_depth else tt_score
+            if alpha >= beta: 
+                return tt_best_move if depth == original_depth else tt_score
 
     if game.state in ["Draw (Threefold repetition)", "Draw (50-move rule)"]: return 0
 
@@ -879,33 +922,71 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
         start_idx = start[0] * 8 + start[1]
         end_idx = end[0] * 8 + end[1]
 
+        # Principal Variation move gets highest priority
         if principal_variation and move_tuple == principal_variation:
-            priority = 100000
+            priority = 1000000
+        
+        # Transposition table best move gets second highest priority
         elif tt_best_move == move_tuple:
-            priority = 90000
-        elif game.board[end[0]][end[1]]:  # Captures (MVV-LVA)
+            priority = 900000
+        
+        # Captures with MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
+        elif game.board[end[0]][end[1]]:  
             victim_val = piece_values.get(game.board[end[0]][end[1]].name, 0)
             attacker_val = piece_values.get(game.board[start[0]][start[1]].name, 1)
-            priority = 10000 + victim_val * 10 - attacker_val
-        else:  # Quiet Moves (Killer and History Heuristics)
+            priority = 800000 + victim_val * 10 - attacker_val
+            
+            # Bonus for capturing with a less valuable piece
+            if attacker_val < victim_val:
+                priority += 50000
+        
+        # Checks get high priority
+        else:
+            # Test if this move gives check
+            temp_copy = game.light_copy()
+            if temp_copy._force_move(start, end, promotion):
+                if temp_copy.is_check(temp_copy.turn):
+                    priority = 700000
+        
+        # Killer moves get good priority
+        if priority < 100000:  # Only for quiet moves
             if ply < len(KILLER_MOVES) and move_tuple in KILLER_MOVES[ply]:
-                priority = 8000 + (1 - KILLER_MOVES[ply].index(move_tuple)) * 250
-            else:
-                priority = HISTORY_MOVES[start_idx][end_idx]
+                priority = 600000 + (1 - KILLER_MOVES[ply].index(move_tuple)) * 25000
+        
+        # History heuristic for remaining moves
+        if priority < 100000:
+            priority = HISTORY_MOVES[start_idx][end_idx]
+            
+        # Bonus for central moves
+        if end[0] in [3, 4] and end[1] in [3, 4]:
+            priority += 1000
+            
+        # Bonus for developing moves in opening
+        if game.move_count < 15:
+            piece = game.board[start[0]][start[1]]
+            if piece and piece.name in ['N', 'B']:
+                if start[0] in [7, 0] and end[0] not in [7, 0]:  # Moving from back rank
+                    priority += 2000
+        
         return priority
 
     for r in range(8):
         for c in range(8):
             piece = game.board[r][c]
             if piece and piece.colour == current_colour:
-                moves = game.get_moves(r, c)
-                move_cache[(r, c)] = moves
-                for move in moves:
-                    promotion_options = ['Q', 'R', 'B', 'N'] if piece.name == 'P' and (
-                            move[0] == 0 or move[0] == 7) else [None]
-                    for p in promotion_options:
-                        priority = calculate_priority((r, c), move, p, tt_best_move, principal_variation)
-                        all_moves.append((priority, (r, c), move, p))
+                try:
+                    moves = game.get_moves(r, c)
+                    move_cache[(r, c)] = moves
+                    for move in moves:
+                        promotion_options = ['Q', 'R', 'B', 'N'] if piece.name == 'P' and (
+                                move[0] == 0 or move[0] == 7) else [None]
+                        for p in promotion_options:
+                            priority = calculate_priority((r, c), move, p, tt_best_move, principal_variation)
+                            all_moves.append((priority, (r, c), move, p))
+                except Exception:
+                    # Skip this piece if there's an error getting moves
+                    move_cache[(r, c)] = []
+                    continue
     all_moves.sort(key=lambda x: x[0], reverse=True)
 
     if not all_moves:
@@ -920,11 +1001,19 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
     for priority, start, end, promotion in all_moves:
         is_capture = game.board[end[0]][end[1]] is not None
 
-        # Futility Pruning
+        # Enhanced Futility Pruning
         if not is_in_check and not is_capture and depth <= 3 and abs(alpha) < 900000 and abs(beta) < 900000:
             futility_margin_val = FUTILITY_MARGIN * depth
-            if maximizing and static_eval + futility_margin_val <= alpha: continue
-            if not maximizing and static_eval - futility_margin_val >= beta: continue
+            # Add piece value to margin for captures
+            if is_capture:
+                captured_piece = game.board[end[0]][end[1]]
+                if captured_piece:
+                    futility_margin_val += piece_values.get(captured_piece.name, 0)
+            
+            if maximizing and static_eval + futility_margin_val <= alpha: 
+                continue
+            if not maximizing and static_eval - futility_margin_val >= beta: 
+                continue
 
         # SEE Pruning
         if is_capture:
@@ -935,12 +1024,38 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
         copy = game.light_copy()
         if not copy.make_move(start, end, promotion): continue
 
-        # Dynamic LMR
+        # Enhanced Dynamic LMR
         reduction = 0
         if depth >= 3 and move_index >= 3 and not is_capture and not is_in_check:
             try:
+                # Calculate phase for LMR
+                current_material = sum(
+                    PHASE_MATERIAL.get(game.board[r][c].name, 0) for r in range(8) for c in range(8) if game.board[r][c])
+                phase = 1.0 - (current_material / MAX_PHASE_MATERIAL)
+                phase = max(0.0, min(1.0, phase))
+                
+                # Base reduction based on depth and move index
                 reduction = int(math.log(depth) * math.log(move_index) / 2.5)
-                if priority < 1000: reduction += 1
+                
+                # Additional reduction for low-priority moves
+                if priority < 1000: 
+                    reduction += 1
+                
+                # Reduce more in endgame
+                if phase > 0.7:  # Endgame
+                    reduction += 1
+                
+                # Reduce less for central moves
+                if end[0] in [3, 4] and end[1] in [3, 4]:
+                    reduction = max(0, reduction - 1)
+                
+                # Reduce less for developing moves in opening
+                if game.move_count < 15:
+                    piece = game.board[start[0]][start[1]]
+                    if piece and piece.name in ['N', 'B']:
+                        if start[0] in [7, 0] and end[0] not in [7, 0]:
+                            reduction = max(0, reduction - 1)
+                
                 reduction = max(0, min(reduction, depth - 2))
             except ValueError:
                 reduction = 0

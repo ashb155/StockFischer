@@ -1,77 +1,81 @@
 from pieces import Piece
 
-def pawn_moves(board,row,col,enpassant=None):
-    piece=board[row][col]
-    moves=[]
+def pawn_moves(board, row, col, enpassant=None):
+    piece = board[row][col]
+    moves = []
 
-    if not piece or piece.name != 'P': #reject other pieces or empty square
+    if not piece or piece.name != 'P':  # reject other pieces or empty square
         return moves
 
-    direction = -1 if piece.colour=='w' else 1  #white moves to lower index while vice versa for black
-    if 0 <= row+direction < 8 and board[row+direction][col] is None:
-        moves.append((row+direction,col))
+    direction = -1 if piece.colour == 'w' else 1  # white moves to lower index while vice versa for black
+    
+    # Forward move
+    if 0 <= row + direction < 8 and board[row + direction][col] is None:
+        moves.append((row + direction, col))
 
-        start_row = 6 if piece.colour == 'w' else 1  #pawn 2 places for 1st move
+        # Double move from starting position
+        start_row = 6 if piece.colour == 'w' else 1  # pawn 2 places for 1st move
         if row == start_row and board[row + 2 * direction][col] is None:
-            moves.append((row+2*direction,col))
+            moves.append((row + 2 * direction, col))
 
-
-    for diagonal in [-1,1]:     #pawn captures diagonally
-        ncol= col + diagonal
-        nrow= row + direction
+    # Diagonal captures
+    for diagonal in [-1, 1]:  # pawn captures diagonally
+        ncol = col + diagonal
+        nrow = row + direction
         if 0 <= nrow < 8 and 0 <= ncol < 8:
             target = board[nrow][ncol]
-            if target and target.colour != piece.colour:  #checks if opposite colour on square
-                moves.append((nrow,ncol))
+            if target and target.colour != piece.colour:  # checks if opposite colour on square
+                moves.append((nrow, ncol))
+            # En passant capture
             if enpassant and (nrow, ncol) == enpassant:
                 moves.append((nrow, ncol))
 
     return moves
 
-def rook_moves(board,row,col):
-    piece=board[row][col]
-    moves=[]
-    if not piece or piece.name not in ['R','Q']: #part of queen function also
+def rook_moves(board, row, col):
+    piece = board[row][col]
+    moves = []
+    if not piece or piece.name not in ['R', 'Q']:  # part of queen function also
         return moves
 
-    directions=[(1,0),(-1,0),(0,1),(0,-1)] #rook directions
-    for dr,dc in directions:
-        r,c = row+dr, col+dc
+    directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]  # rook directions
+    for dr, dc in directions:
+        r, c = row + dr, col + dc
         while 0 <= r < 8 and 0 <= c < 8:
             target = board[r][c]
-            if target is None:  #empty square
-                moves.append((r,c))
-            elif target.colour != piece.colour: #checks if opposite colour on square
-                moves.append((r,c))
+            if target is None:  # empty square
+                moves.append((r, c))
+            elif target.colour != piece.colour:  # checks if opposite colour on square
+                moves.append((r, c))
                 break
             else:
                 break
-            r+=dr
-            c+=dc
+            r += dr
+            c += dc
     return moves
 
-def knight_moves(board,row,col):
-    piece=board[row][col]
-    moves=[]
-    if not piece or piece.name !='N':  #rejects other pieces or empty square
+def knight_moves(board, row, col):
+    piece = board[row][col]
+    moves = []
+    if not piece or piece.name != 'N':  # rejects other pieces or empty square
         return moves
 
-    directions=[(-2,-1),(-2,1),(-1,-2),(-1,2),(1,-2),(1,2),(2,-1),(2,1)] #knight directions
-    for dr,dc in directions:
-        r,c = row+dr, col+dc
+    directions = [(-2, -1), (-2, 1), (-1, -2), (-1, 2), (1, -2), (1, 2), (2, -1), (2, 1)]  # knight directions
+    for dr, dc in directions:
+        r, c = row + dr, col + dc
         if 0 <= r < 8 and 0 <= c < 8:
             target = board[r][c]
             if target is None or target.colour != piece.colour:
                 moves.append((r, c))
     return moves
 
-def bishop_moves(board,row,col):
-    piece=board[row][col]
-    moves=[]
-    if not piece or piece.name not in ['B','Q']: #part of queen function also
+def bishop_moves(board, row, col):
+    piece = board[row][col]
+    moves = []
+    if not piece or piece.name not in ['B', 'Q']:  # part of queen function also
         return moves
 
-    directions = [(1,1),(1,-1),(-1,1),(-1,-1)] #bishop directions
+    directions = [(1, 1), (1, -1), (-1, 1), (-1, -1)]  # bishop directions
     for dr, dc in directions:
         r, c = row + dr, col + dc
         while 0 <= r < 8 and 0 <= c < 8:
@@ -88,20 +92,20 @@ def bishop_moves(board,row,col):
     return moves
 
 def queen_moves(board, row, col):
-    return rook_moves(board, row, col) + bishop_moves(board, row, col) #queen=rook+bishop
+    return rook_moves(board, row, col) + bishop_moves(board, row, col)  # queen=rook+bishop
 
 
 def king_moves(board, row, col):
     piece = board[row][col]
     moves = []
-    if not piece or piece.name != 'K': #rejects other pieces or empty square
+    if not piece or piece.name != 'K':  # rejects other pieces or empty square
         return moves
 
-    directions = [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)] #king directions
+    directions = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]  # king directions
     for dr, dc in directions:
         r, c = row + dr, col + dc
         if 0 <= r < 8 and 0 <= c < 8:
             target = board[r][c]
             if target is None or target.colour != piece.colour:
-                moves.append((r,c))
+                moves.append((r, c))
     return moves

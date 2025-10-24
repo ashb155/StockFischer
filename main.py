@@ -181,8 +181,8 @@ while True:
                          break
                 else:
                     print("AI cannot find any legal moves (Checkmate/Stalemate?).")
-                    if game.is_checkmate(): game.state = "Checkmate"
-                    elif game.is_stalemate(): game.state = "Stalemate"
+                    if game.is_checkmate(game.turn): game.state = "Checkmate"
+                    elif game.is_stalemate(game.turn): game.state = "Stalemate"
                     print(f"Final State: {game.state}")
                     break
 

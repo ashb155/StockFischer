@@ -116,7 +116,8 @@ def load_polyglot_books():
 
 def get_polyglot_book_move(game_instance):
     reader = white_reader if game_instance.turn == 'w' else black_reader
-    if not reader: return None
+    if not reader: 
+        return None
 
     board = your_board_to_chess_board(game_instance)
     if board is None:
@@ -126,7 +127,8 @@ def get_polyglot_book_move(game_instance):
     try:
         # --- RANDOM CHOICE ---
         all_entries = list(reader.find_all(board))
-        if not all_entries: return None
+        if not all_entries: 
+            return None
         entry = random.choice(all_entries)
         # --- END RANDOM ---
         move = entry.move
@@ -142,13 +144,13 @@ def get_polyglot_book_move(game_instance):
 
         return ((start_row, start_col), (end_row, end_col), promotion_char)
 
-    except KeyError: # Position hash not found
+    except KeyError:  # Position hash not found
         return None
-    except ValueError as e: # Invalid board state during lookup
+    except ValueError as e:  # Invalid board state during lookup
         print(f"Error: Invalid board state detected during book lookup: {e}")
         print(f"Board FEN during error: {board.fen()}")
         return None
-    except Exception as e: # Other unexpected errors
+    except Exception as e:  # Other unexpected errors
         print(f"Unexpected error during Polyglot lookup: {type(e).__name__}: {e}")
         print(f"Board FEN during error: {board.fen()}")
         return None
