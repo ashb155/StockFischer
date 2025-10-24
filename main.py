@@ -8,10 +8,10 @@ import random
 from opening_book import get_polyglot_book_move
 
 # --- Search Depth Mapping ---
-difficulty = {'easy': 2, 'medium': 3, "hard": 4}
+difficulty = {'easy': 2, 'medium': 3, "hard": 6}
 
 # --- time limit mapping by Difficulty ---
-time_limits = {'easy': 2.0, 'medium': 5.0, "hard": 10.0}
+time_limits = {'easy': 10.0, 'medium': 20.0, "hard": 30.0}
 
 level = input('Choose level - Easy / Medium / Hard: ').strip().lower()
 
