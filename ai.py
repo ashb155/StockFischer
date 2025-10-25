@@ -86,8 +86,8 @@ king_endgame_table = list([  # Endgame
 
 # --- Scalar Bonuses (Tunable Parameters) ---
 MOBILITY_BONUS = 2.0
-CENTER_CONTROL_BONUS = 15
-TEMPO_BONUS = 10
+CENTER_CONTROL_BONUS = 35  # <-- INCREASED from 15 to 35
+TEMPO_BONUS = 10  # <-- KEPT
 KNIGHT_OUTPOST_BONUS = 20
 BISHOP_FIANCHETTO_BONUS = 15
 ROOK_ON_SEVENTH_BONUS = 25
@@ -123,8 +123,11 @@ BATTERY_BONUS = 20
 SPACE_BONUS_FACTOR = 2.0
 INITIATIVE_FACTOR = 3.0
 INITIATIVE_FLAT_BONUS = 20
-CASTLING_BONUS = 30  # <<< --- ADDED CASTLING BONUS --- <<<
-KNIGHT_SYNERGY_BONUS = 25  # <<< --- ADDED KNIGHT SYNERGY BONUS --- <<<
+CASTLING_BONUS = 30
+KNIGHT_SYNERGY_BONUS = 25
+
+# --- NEW: Relative Pin Penalty ---
+RELATIVE_PIN_PENALTY = -35
 
 # King attack weights (Tunable)
 king_attack_weights = {'Q': 5, 'R': 3, 'B': 2, 'N': 2, 'P': 1}
@@ -158,7 +161,7 @@ def _build_parameter_metadata():
             if piece_name in piece_values: _register_param_meta(f"value_{piece_name}", piece_values[piece_name],
                                                                 piece_values, piece_name)
 
-    # *** ADDED KNIGHT_SYNERGY_BONUS and CASTLING_BONUS TO LIST ***
+    # --- UPDATED: Add RELATIVE_PIN_PENALTY to metadata ---
     scalar_constants = [
         "MOBILITY_BONUS", "CENTER_CONTROL_BONUS", "TEMPO_BONUS", "KNIGHT_OUTPOST_BONUS",
         "BISHOP_FIANCHETTO_BONUS", "ROOK_ON_SEVENTH_BONUS", "ROOK_OPEN_FILE_BONUS",
@@ -174,7 +177,8 @@ def _build_parameter_metadata():
         "KING_NOT_CASTLED_PENALTY", "KING_STUCK_CENTER_PENALTY",
         "PIGS_ON_SEVENTH_BONUS", "BATTERY_BONUS", "SPACE_BONUS_FACTOR",
         "INITIATIVE_FACTOR", "INITIATIVE_FLAT_BONUS", "CASTLING_BONUS",
-        "KNIGHT_SYNERGY_BONUS"  # <-- ADDED
+        "KNIGHT_SYNERGY_BONUS",
+        "RELATIVE_PIN_PENALTY"  # <--- ADDED
     ]
     for const_name in scalar_constants:
         if const_name in current_globals: _register_param_meta(const_name, current_globals[const_name])
@@ -188,7 +192,7 @@ def _build_parameter_metadata():
                                                                                    king_attack_weights, piece_name)
 
 
-# --- Function to Apply Weights ---
+# --- Function to Apply Weights (Unchanged) ---
 def _apply_weights(theta):
     if len(theta) != len(_param_order): return False
     current_globals = globals()
@@ -210,7 +214,7 @@ def _apply_weights(theta):
     return True
 
 
-# --- Load Optimized Weights at Startup ---
+# --- Load Optimized Weights at Startup (Unchanged) ---
 OPTIMIZED_WEIGHTS_FILE = 'optimized_weights.npy'
 try:
     _build_parameter_metadata()
@@ -230,7 +234,7 @@ if not _param_order:
     _build_parameter_metadata()
 
 
-# --- Helper Function: Convert python-chess board to internal representation ---
+# --- Helper Function: Convert python-chess board to internal representation (Unchanged) ---
 def board_to_internal_representation(board):
     internal_board = [[None for _ in range(8)] for _ in range(8)]
     for r in range(8):
@@ -244,7 +248,7 @@ def board_to_internal_representation(board):
     return internal_board
 
 
-# --- MODIFIED evaluate_board ---
+# --- MODIFIED evaluate_board (NEW: Pin Detection Added) ---
 def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
                    move_count=15):
     score = 0;
@@ -252,7 +256,7 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
     white_bishops, black_bishops = [], []
     white_king_pos, black_king_pos = None, None
 
-    # --- Pre-evaluation setup (no change) ---
+    # --- Pre-evaluation setup (omitted detail) ---
     for r_k in range(8):
         for c_k in range(8):
             p_k = internal_board[r_k][c_k]
@@ -280,7 +284,63 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
     king_zone_attack_count = [0] * 2
     white_queen_pos, black_queen_pos = None, None
     white_rooks_bishops, black_rooks_bishops = [], []
-    white_knights, black_knights = [], []  # <<< Added to collect Knight positions
+    white_knights, black_knights = [], []
+
+    # --- Pin Detection Setup ---
+    pinned_pieces = []
+
+    # Directions for sliding pieces (Rook: straight, Bishop: diagonal, Queen: both)
+    ALL_DIRECTIONS = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
+
+    for r_start in range(8):
+        for c_start in range(8):
+            pin_piece = internal_board[r_start][c_start]
+            if not pin_piece or pin_piece.name not in ['R', 'B', 'Q']:
+                continue
+
+            for dr, dc in ALL_DIRECTIONS:
+                r, c, found_friendly = r_start + dr, c_start + dc, False
+                pinned_pos = None
+
+                while 0 <= r < 8 and 0 <= c < 8:
+                    current_piece = internal_board[r][c]
+
+                    if current_piece:
+                        if current_piece.colour == pin_piece.colour:
+                            # Found a friendly piece - cannot be a pin starter
+                            break
+
+                        # Found an enemy piece (potential pinned piece)
+                        if not found_friendly:
+                            found_friendly = True
+                            pinned_pos = (r, c)
+                        else:
+                            # Found a second enemy piece (potential shielded piece)
+                            shielded_piece = current_piece
+
+                            if internal_board[pinned_pos[0]][pinned_pos[1]].name == 'K':  # Absolute pin
+                                break
+
+                            # Relative Pin: Pinned piece shields a piece *more* valuable (or Queen)
+                            pinned_piece_obj = internal_board[pinned_pos[0]][pinned_pos[1]]
+
+                            pinned_value = piece_values.get(pinned_piece_obj.name, 0)
+                            shielded_value = piece_values.get(shielded_piece.name, 0)
+
+                            # Check if Pinned piece is less valuable than Shielded piece (relative pin)
+                            if (shielded_value > pinned_value):
+                                # Check if the pin piece is capable of the pin (e.g., Bishop on diagonal)
+                                if (pin_piece.name == 'R' and dr * dc != 0): break  # Rook on diagonal
+                                if (pin_piece.name == 'B' and dr * dc == 0): break  # Bishop on straight
+
+                                if pinned_pos not in pinned_pieces:
+                                    pinned_pieces.append(pinned_pos)
+                                break
+
+                            # If shielded piece is less valuable/same value or pin is not strong, stop the ray
+                            break
+                    r += dr;
+                    c += dc
 
     # --- Main Evaluation Loop ---
     for row in range(8):
@@ -290,6 +350,8 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
             val = piece_values.get(piece.name, 0)
             index = (row * 8 + col, (7 - row) * 8 + col)[piece.colour == 'b']
             if not (0 <= index < 64): continue
+
+            # --- PST and King Eval ---
             try:
                 if piece.name == 'P':
                     val += pawn_table[index]
@@ -306,6 +368,7 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
             except IndexError:
                 pass
 
+            # --- KNIGHT/BISHOP/ROOK LOGIC (Outposts, Fianchetto, Ranks) ---
             if piece.name == 'N':
                 # --- Original Knight Outpost Logic ---
                 is_s, is_a = False, False;
@@ -323,10 +386,7 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
                                 p := internal_board[a_r][
                                     ac]) and p.name == 'P' and p.colour != piece.colour: is_a = True; break
                 if is_s and not is_a: val += KNIGHT_OUTPOST_BONUS
-
-                # --- Store Knight position for synergy check later ---
                 (white_knights, black_knights)[piece.colour == 'b'].append((row, col))
-
             elif piece.name == 'B':
                 (white_bishops, black_bishops)[piece.colour == 'b'].append((row, col))
                 (white_rooks_bishops, black_rooks_bishops)[piece.colour == 'b'].append((piece.name, (row, col)))
@@ -349,6 +409,10 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
                     black_queen_pos = (row, col)
             if piece.name == 'P': (white_pawns, black_pawns)[piece.colour == 'b'].append((row, col))
 
+            # --- NEW: Apply Relative Pin Penalty ---
+            if (row, col) in pinned_pieces:
+                val += RELATIVE_PIN_PENALTY
+
             score += val * (1, -1)[piece.colour == 'b']
 
             if piece.name != 'K':
@@ -362,7 +426,7 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
                         ki = (1, 0)[piece.colour == 'b'];
                         king_zone_attack_count[ki] += aw
 
-    # --- Pawn Structure (no change) ---
+    # --- Pawn Structure (omitted detail) ---
     def pawn_structure(pawns, colour):
         bonus = 0;
         files = [0] * 8
@@ -443,7 +507,7 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
     score += pawn_structure(white_pawns, 'w')
     score -= pawn_structure(black_pawns, 'b')
 
-    # --- Bad Bishop ---
+    # --- Bad Bishop (omitted detail) ---
     wp_lc, wp_dc, bp_lc, bp_dc = 0, 0, 0, 0;
     cf = {2, 3, 4, 5}
     for r, c in white_pawns:
@@ -467,40 +531,29 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
         if idx in (0, 1): bbp -= (bp_lc, bp_dc)[idx] * BAD_BISHOP_FACTOR
     score += bbp
 
-    # --- Bishop Pair (no change) ---
+    # --- Bishop Pair (omitted detail) ---
     if len(white_bishops) >= 2: score += BISHOP_PAIR_BONUS
     if len(black_bishops) >= 2: score -= BISHOP_PAIR_BONUS
 
-    # --- NEW: Knight Synergy/Mutual Support ---
+    # --- Knight Synergy/Mutual Support (omitted detail) ---
     def check_knight_synergy(knights):
         bonus = 0
         if len(knights) < 2: return 0
-
-        # Knight Deltas for checking attack
         knight_deltas = [(-2, -1), (-2, 1), (-1, -2), (-1, 2), (1, -2), (1, 2), (2, -1), (2, 1)]
-
         for i in range(len(knights)):
             for j in range(i + 1, len(knights)):
-                r1, c1 = knights[i]
+                r1, c1 = knights[i];
                 r2, c2 = knights[j]
-
-                # Check if N1 attacks N2 (since they are the same color, this is mutual defense)
                 dr, dc = abs(r1 - r2), abs(c1 - c2)
                 is_mutual_support = (dr == 1 and dc == 2) or (dr == 2 and dc == 1)
-
-                # Check for central influence (r=2 to 5, c=2 to 5 -> squares c3/f6 to f3/c6)
-                is_central = r1 in range(2, 6) and c1 in range(2, 6) and \
-                             r2 in range(2, 6) and c2 in range(2, 6)
-
-                if is_mutual_support and is_central:
-                    bonus += KNIGHT_SYNERGY_BONUS
-
+                is_central = r1 in range(2, 6) and c1 in range(2, 6) and r2 in range(2, 6) and c2 in range(2, 6)
+                if is_mutual_support and is_central: bonus += KNIGHT_SYNERGY_BONUS
         return bonus
 
     score += check_knight_synergy(white_knights)
     score -= check_knight_synergy(black_knights)
 
-    # --- King Safety (no change) ---
+    # --- King Safety (omitted detail) ---
     def king_safety(colour, king_pos, num_attackers):
         if king_pos is None: return 0
         kr, kc = king_pos;
@@ -528,7 +581,7 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
     if white_king_pos: score += int(king_safety('w', white_king_pos, king_zone_attack_count[0]) * (1 - phase))
     if black_king_pos: score -= int(king_safety('b', black_king_pos, king_zone_attack_count[1]) * (1 - phase))
 
-    # --- Connected Rooks (no change) ---
+    # --- Connected Rooks (omitted detail) ---
     wr = [(r, c) for r in range(8) for c in range(8) if
           (p := internal_board[r][c]) and p.name == 'R' and p.colour == 'w']
     br = [(r, c) for r in range(8) for c in range(8) if
@@ -546,67 +599,54 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
                 (c1 == c2 and all(internal_board[r][c1] is None for r in
                                   range(min(r1, r2) + 1, max(r1, r2)))): score -= CONNECTED_ROOKS_BONUS
 
-    # --- Undeveloped Pieces & Castling Bonus (no change) ---
+    # --- Undeveloped Pieces & Castling Bonus (omitted detail) ---
     if move_count > 4:
         up = 0
-        # White
         if internal_board[7][1] and internal_board[7][1].name == 'N': up += UNDEVELOPED_MINOR_PENALTY
         if internal_board[7][2] and internal_board[7][2].name == 'B': up += UNDEVELOPED_MINOR_PENALTY
         if internal_board[7][5] and internal_board[7][5].name == 'B': up += UNDEVELOPED_MINOR_PENALTY
         if internal_board[7][6] and internal_board[7][6].name == 'N': up += UNDEVELOPED_MINOR_PENALTY
-
-        # Check castling status
         white_castled = False
         if castling_rights.get('wKR') or castling_rights.get('wQR'):
-            # Still has rights, penalize
             if internal_board[7][7] and internal_board[7][7].name == 'R': up += UNDEVELOPED_ROOK_PENALTY
             if internal_board[7][0] and internal_board[7][0].name == 'R': up += UNDEVELOPED_ROOK_PENALTY
             up += KING_NOT_CASTLED_PENALTY
-        elif white_king_pos in [(7, 6), (7, 2)]:  # Rights are gone AND king is on castled square
-            white_castled = True
-            score += CASTLING_BONUS  # *** ADDED BONUS ***
-
-        # Black
+        elif white_king_pos in [(7, 6), (7, 2)]:
+            white_castled = True; score += CASTLING_BONUS
         if internal_board[0][1] and internal_board[0][1].name == 'N': up -= UNDEVELOPED_MINOR_PENALTY
         if internal_board[0][2] and internal_board[0][2].name == 'B': up -= UNDEVELOPED_MINOR_PENALTY
         if internal_board[0][5] and internal_board[0][5].name == 'B': up -= UNDEVELOPED_MINOR_PENALTY
         if internal_board[0][6] and internal_board[0][6].name == 'N': up -= UNDEVELOPED_MINOR_PENALTY
-
         black_castled = False
         if castling_rights.get('bKR') or castling_rights.get('bQR'):
             if internal_board[0][7] and internal_board[0][7].name == 'R': up -= UNDEVELOPED_ROOK_PENALTY
             if internal_board[0][0] and internal_board[0][0].name == 'R': up -= UNDEVELOPED_ROOK_PENALTY
             up -= KING_NOT_CASTLED_PENALTY
-        elif black_king_pos in [(0, 6), (0, 2)]:  # Rights are gone AND king is on castled square
-            black_castled = True
-            score -= CASTLING_BONUS  # *** ADDED BONUS (negative for black) ***
-
+        elif black_king_pos in [(0, 6), (0, 2)]:
+            black_castled = True; score -= CASTLING_BONUS
         score += up
-
-        # --- King Stuck in Center Penalty (Modified) ---
-        # Only apply if *not* castled and still has rights
         if move_count > 10:
             if white_king_pos == (7, 4) and not white_castled and (
-                    castling_rights.get('wKR') or castling_rights.get('wQR')):
-                score += int(KING_STUCK_CENTER_PENALTY * (1 - phase))
+                    castling_rights.get('wKR') or castling_rights.get('wQR')): score += int(
+                KING_STUCK_CENTER_PENALTY * (1 - phase))
             if black_king_pos == (0, 4) and not black_castled and (
-                    castling_rights.get('bKR') or castling_rights.get('bQR')):
-                score -= int(KING_STUCK_CENTER_PENALTY * (1 - phase))
+                    castling_rights.get('bKR') or castling_rights.get('bQR')): score -= int(
+                KING_STUCK_CENTER_PENALTY * (1 - phase))
 
-    # --- Central Control (no change) ---
+    # --- Central Control (omitted detail) ---
     center = [(r, c) for r in range(2, 6) for c in range(2, 6)]
     for r, c in center:
         if p := internal_board[r][c]:
             bonus = (CENTER_CONTROL_BONUS, CENTER_CONTROL_BONUS // 2)[not (r in (3, 4) and c in (3, 4))]
             score += bonus * (1, -1)[p.colour == 'b']
 
-    # --- Pigs on 7th (no change) ---
+    # --- Pigs on 7th (omitted detail) ---
     if sum(1 for c in range(8) if
            (p := internal_board[1][c]) and p.name == 'R' and p.colour == 'w') >= 2: score += PIGS_ON_SEVENTH_BONUS
     if sum(1 for c in range(8) if
            (p := internal_board[6][c]) and p.name == 'R' and p.colour == 'b') >= 2: score -= PIGS_ON_SEVENTH_BONUS
 
-    # --- Battery Bonus (no change) ---
+    # --- Battery Bonus (omitted detail) ---
     bb = 0
     if white_queen_pos:
         qr, qc = white_queen_pos
@@ -648,7 +688,7 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
             if is_bat: bb -= BATTERY_BONUS
     score += bb
 
-    # --- Space Control (no change) ---
+    # --- Space Control (omitted detail) ---
     sb = 0
     for r in (4, 5, 6):
         for c in (2, 3, 4, 5):
@@ -658,7 +698,7 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
             if (r, c) not in white_pawn_attacks: sb -= SPACE_BONUS_FACTOR
     score += sb
 
-    # --- Initiative (no change) ---
+    # --- Initiative (omitted detail) ---
     init_diff = king_zone_attack_count[0] - king_zone_attack_count[1]
     score += int(init_diff * INITIATIVE_FACTOR * (1 - phase))
     if init_diff > 0:
@@ -666,7 +706,7 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
     elif init_diff < 0:
         score -= int(INITIATIVE_FLAT_BONUS * (1 - phase))
 
-    # --- Tempo (no change) ---
+    # --- Tempo (omitted detail) ---
     score += TEMPO_BONUS * (1, -1)[turn == 'b']
 
     return int(score)
@@ -680,7 +720,6 @@ def evaluate_board_fen(fen_str):
     try:
         board = chess.Board(fen_str)
         if board.is_insufficient_material(): return 0
-
         internal_board = board_to_internal_representation(board)
         turn = ('w', 'b')[board.turn == chess.BLACK]
         castling = {
@@ -695,10 +734,8 @@ def evaluate_board_fen(fen_str):
             file = chess.square_file(board.ep_square)
             enp = (7 - rank, file)
         mc = board.fullmove_number
-
         score = evaluate_board(internal_board, turn, castling, enp, mc)
         return score  # Return score relative to White
-
     except (ValueError, AttributeError) as e:
         return 0
 
@@ -710,9 +747,7 @@ def calculate_zobrist_hash(game):
     """Calculates Zobrist hash for a Game object state."""
     h = 0
     if not all(hasattr(game, attr) for attr in ['board', 'turn', 'castling', 'enpassant']): return 0
-
     board_repr, turn, castling, enpassant = game.board, game.turn, game.castling, game.enpassant
-
     for r in range(8):
         for c in range(8):
             piece = board_repr[r][c]
@@ -722,25 +757,21 @@ def calculate_zobrist_hash(game):
                     piece_index = PIECE_TO_INDEX[(piece.colour, piece.name)]
                     key_index = index * 12 + piece_index
                     if 0 <= key_index < ZOBRIST_SIZE: h ^= ZOBRIST_KEYS[key_index]
-
     offset = 64 * 12
     if 0 <= offset < ZOBRIST_SIZE:
         if turn == 'w': h ^= ZOBRIST_KEYS[offset]
-
     offset += 1
     if 0 <= offset + 3 < ZOBRIST_SIZE:
         if castling.get('wKR'): h ^= ZOBRIST_KEYS[offset + 0]
         if castling.get('wQR'): h ^= ZOBRIST_KEYS[offset + 1]
         if castling.get('bKR'): h ^= ZOBRIST_KEYS[offset + 2]
         if castling.get('bQR'): h ^= ZOBRIST_KEYS[offset + 3]
-
     offset += 4
     if enpassant and isinstance(enpassant, tuple) and len(enpassant) == 2 and \
             0 <= enpassant[0] < 8 and 0 <= enpassant[1] < 8:
         file_index = enpassant[1]
         key_index = offset + file_index
         if 0 <= key_index < ZOBRIST_SIZE: h ^= ZOBRIST_KEYS[key_index]
-
     return h
 
 
@@ -751,13 +782,11 @@ def static_exchange_eval_local(game, start, end):
             isinstance(end, tuple) and len(end) == 2 and 0 <= end[0] < 8 and 0 <= end[1] < 8): return 0
     if not (hasattr(game, 'board') and isinstance(game.board, list) and len(game.board) == 8 and isinstance(
             game.board[0], list) and len(game.board[0]) == 8): return 0
-
     attacker_piece = game.board[start[0]][start[1]]
     target_piece = game.board[end[0]][end[1]]
     if not attacker_piece or not target_piece: return 0
     target_val = piece_values.get(target_piece.name, 0)
     if target_val == 0: return 0
-
     gains = [target_val]
     try:
         if not all(hasattr(game, m) for m in ['light_copy', '_force_move', 'attack_moves']): return 0
@@ -765,10 +794,8 @@ def static_exchange_eval_local(game, start, end):
         if not copyg._force_move(start, end): return 0
     except Exception:
         return 0
-
     side, target_square = copyg.turn, end
-
-    for _ in range(32):  # Limit iterations
+    for _ in range(32):
         best_attacker_val, best_attacker_pos, found_attacker = float('inf'), None, False
         try:
             if not hasattr(copyg, 'attack_moves'): return 0
@@ -786,19 +813,15 @@ def static_exchange_eval_local(game, start, end):
             if not found_attacker: break
         except Exception:
             return 0
-
         captured_piece_obj = copyg.board[target_square[0]][target_square[1]]
         if not captured_piece_obj: break
         gains.append(piece_values.get(captured_piece_obj.name, 0))
-
         try:
             if not hasattr(copyg, '_force_move'): return 0
             if not copyg._force_move(best_attacker_pos, target_square): break
         except Exception:
             return 0
-
         side = ('b', 'w')[side == 'b']
-
     see_score, next_capture_sign = 0, -1
     for i in range(len(gains) - 1, 0, -1):
         see_score = max(0, gains[i] + next_capture_sign * see_score);
@@ -815,14 +838,12 @@ def quiescence_search(game, alpha, beta, maximizing, move_cache=None):
         stand_pat = evaluate_board(game.board, game.turn, game.castling, game.enpassant, game.move_count)
     except Exception:
         return alpha if maximizing else beta
-
     if maximizing:
         if stand_pat >= beta: return beta
         alpha = max(alpha, stand_pat)
     else:
         if stand_pat <= alpha: return alpha
         beta = min(beta, stand_pat)
-
     forcing_moves, colour = [], game.turn
     try:
         if not all(hasattr(game, m) for m in
@@ -852,9 +873,7 @@ def quiescence_search(game, alpha, beta, maximizing, move_cache=None):
                             forcing_moves.append((priority, (r, c), end_pos, p_promo))
     except Exception:
         return alpha if maximizing else beta
-
     forcing_moves.sort(key=lambda x: x[0], reverse=True)
-
     for priority, start, end, promotion in forcing_moves:
         capture_val = 0;
         victim = game.board[end[0]][end[1]]
@@ -864,12 +883,10 @@ def quiescence_search(game, alpha, beta, maximizing, move_cache=None):
         potential_score = stand_pat + capture_val + promo_val
         if (maximizing and potential_score + delta_margin < alpha) or \
                 (not maximizing and potential_score - delta_margin > beta): continue
-
         is_capture_move = game.board[end[0]][end[1]] is not None
         if is_capture_move:
             see_score = static_exchange_eval_local(game, start, end)
             if (maximizing and see_score < 0) or (not maximizing and see_score > 0): continue
-
         try:
             if not all(hasattr(game, m) for m in ['light_copy', 'make_move']): continue
             copy = game.light_copy()
@@ -883,7 +900,6 @@ def quiescence_search(game, alpha, beta, maximizing, move_cache=None):
                 beta = min(beta, q_eval)
         except Exception:
             continue
-
     return alpha if maximizing else beta
 
 
@@ -893,15 +909,12 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
     """Main search function, uses the Game object."""
     if original_depth is None: original_depth = depth
     ply = original_depth - depth
-
     if time_limit is not None and start_time is not None and ply > 0 and (ply % 3 == 0):
         if time.time() - start_time > time_limit: return None
-
     alpha_orig = alpha
     tt_key = calculate_zobrist_hash(game)
     tt_entry = TT.get(tt_key) if tt_key is not None else None
     tt_best_move, tt_hit = None, False
-
     if tt_entry:
         tt_depth = tt_entry.get('depth', -1)
         if tt_depth >= depth:
@@ -927,7 +940,6 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
                 elif tt_flag == TT_BETA:
                     beta = min(beta, tt_score)
                 if tt_best_move: tt_hit = True
-
     game_state = getattr(game, 'state', None)
     if hasattr(game, 'position_count') and hasattr(game, 'board_key'):
         try:
@@ -937,13 +949,11 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
         if current_board_key and game.position_count.get(current_board_key, 0) >= 3: return 0
     if hasattr(game, 'move_clock') and game.move_clock >= 100: return 0
     if game_state in ["Draw (Threefold repetition)", "Draw (50-move rule)"]: return 0
-
     try:
         is_in_check = game.is_check(game.turn)
     except AttributeError:
         is_in_check = False
     effective_depth = depth + 1 if is_in_check else depth
-
     if effective_depth <= 0 or game_state in ["Checkmate", "Stalemate"]:
         q_score = quiescence_search(game, alpha, beta, maximizing)
         if abs(q_score) > MATE_SCORE_THRESHOLD:
@@ -951,14 +961,11 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
             mate_ply_leaf = MATE_VALUE - abs(q_score)
             q_score = sign * (MATE_VALUE - (mate_ply_leaf + ply))
         return q_score
-
     best_score_so_far, best_move_found = (-float('inf'), None) if maximizing else (float('inf'), None)
-
     has_majors = any(
         p and p.name not in ['P', 'K'] for r in game.board for p in r if p and p.colour == game.turn) if hasattr(game,
                                                                                                                  'board') else False
     can_null_move = (not is_in_check and depth >= 3 and has_majors and ply > 0)
-
     if can_null_move:
         try:
             if not all(hasattr(game, m) for m in ['light_copy', 'turn', 'enpassant']): raise AttributeError
@@ -973,7 +980,6 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
             if not maximizing and -null_eval <= alpha: return alpha
         except Exception:
             pass
-
     all_moves = []
     current_colour = game.turn
 
@@ -984,12 +990,10 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
         start_idx, end_idx = start[0] * 8 + start[1], end[0] * 8 + end[1]
         if principal_variation and move_tuple == principal_variation: return 1000000
         if tt_best_move == move_tuple: return 900000
-
         # *** ADDED: Check for castling ***
         piece = game.board[start[0]][start[1]]
         if piece and piece.name == 'K' and abs(start[1] - end[1]) == 2:
             return 750000  # Give castling high priority
-
         target = game.board[end[0]][end[1]]
         if target:  # MVV-LVA Captures
             victim = piece_values.get(target.name, 0)
@@ -998,24 +1002,20 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
             see = static_exchange_eval_local(game, start, end)
             priority += max(-50000, min(50000, int(see)))
             return priority
-
         # Killer Moves
         if ply < len(KILLER_MOVES):
             killers = KILLER_MOVES[ply]
             if move_tuple == killers[0]: return 650000
             if move_tuple == killers[1]: return 600000
-
         # History Heuristic
         if 0 <= start_idx < 64 and 0 <= end_idx < 64:
             priority = HISTORY_MOVES[start_idx][end_idx]
         else:
             priority = 0
-
         if end[0] in [3, 4] and end[1] in [3, 4]: priority += 500
         return priority
 
     # --- End of nested function ---
-
     try:
         if not hasattr(game, 'get_moves') or not hasattr(game, 'board'): return 0
         for r in range(8):
@@ -1032,21 +1032,15 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
                             all_moves.append((prio, (r, c), move, p_promo))
     except Exception:
         return 0
-
     all_moves.sort(key=lambda x: x[0], reverse=True)
-
     if not all_moves:
         return (-MATE_VALUE + ply) if is_in_check else 0
-
     move_index = 0
     current_static_eval = evaluate_board(game.board, game.turn, game.castling, game.enpassant, game.move_count)
-
     for priority, start, end, promotion in all_moves:
         if time_limit and start_time and (move_index > 0 and move_index % 5 == 0):
             if time.time() - start_time > time_limit: return None
-
         is_capture = game.board[end[0]][end[1]] is not None
-
         # Futility Pruning
         can_futility_prune = (depth <= 3 and not is_in_check and not is_capture and not promotion and
                               abs(alpha) < MATE_SCORE_THRESHOLD and abs(beta) < MATE_SCORE_THRESHOLD)
@@ -1054,37 +1048,31 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
             futility_margin = FUTILITY_MARGIN * depth
             if maximizing and current_static_eval + futility_margin <= alpha: continue
             if not maximizing and current_static_eval - futility_margin >= beta: continue
-
         # SEE Pruning (moved to priority calculation, but check again for non-positive)
         if is_capture:
             see_score = static_exchange_eval_local(game, start, end)
             if see_score < 0:
                 continue  # Prune likely losing captures # Prune likely losing captures
-
         try:
             if not all(hasattr(game, m) for m in ['light_copy', 'make_move']): continue
             copy = game.light_copy()
             if not copy.make_move(start, end, promotion): continue
         except Exception:
             continue
-
         reduction = 0
         try:
             is_check_move = hasattr(copy, 'is_check') and copy.is_check(copy.turn)
         except Exception:
             is_check_move = False
-
         can_reduce = (depth >= 3 and move_index >= (2 if is_in_check else 4) and
                       not is_capture and not promotion and not is_check_move)
         if can_reduce:
             reduction = int(math.log(depth) * math.log(move_index + 1) / 1.8)
             if priority < 600000: reduction += 1
             reduction = max(0, min(reduction, depth - 2))
-
         eval_score = None;
         search_depth = depth - 1 - reduction
         is_pv_move = (principal_variation == (start, end, promotion))
-
         if move_index == 0 or reduction == 0 or is_pv_move:
             eval_score = minimax_sse(copy, depth - 1, alpha, beta, not maximizing,
                                      original_depth, start_time, time_limit,
@@ -1097,10 +1085,8 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
                 if (eval_score < beta if maximizing else eval_score > alpha):
                     eval_score = minimax_sse(copy, depth - 1, alpha, beta, not maximizing,
                                              original_depth, start_time, time_limit)
-
         move_index += 1
         if eval_score is None: return None
-
         if maximizing:
             if eval_score > best_score_so_far:
                 best_score_so_far = eval_score;
@@ -1131,7 +1117,6 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
                     if 0 <= s_idx < 64 and 0 <= e_idx < 64:
                         HISTORY_MOVES[s_idx][e_idx] = min(HISTORY_MOVES[s_idx][e_idx] + depth * depth, 32000)
                 break
-
     if tt_key is not None:
         score_to_store = best_score_so_far;
         tt_flag = TT_EXACT
@@ -1149,10 +1134,8 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
             move_to_store = best_move_found if (tt_flag == TT_EXACT or tt_flag == TT_ALPHA) else None
             if abs(score_to_store) < MATE_VALUE * 2:
                 TT[tt_key] = {'depth': depth, 'score': score_to_store, 'flag': tt_flag, 'best_move': move_to_store}
-
     final_score = best_score_so_far
     if abs(final_score) > MATE_SCORE_THRESHOLD:
         sign = np.sign(final_score)
         final_score = sign * (MATE_VALUE - ply)
-
     return best_move_found if depth == original_depth else final_score

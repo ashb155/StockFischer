@@ -54,7 +54,7 @@ def register_parameters():
     else:
         print("Warning: ai.piece_values not found or not a dict. Skipping.")
 
-    # Register scalar bonuses (Add ALL tunable constants using getattr)
+    # Register scalar bonuses (Add ALL tunable constants)
     scalar_constants = [
         "MOBILITY_BONUS", "CENTER_CONTROL_BONUS", "TEMPO_BONUS", "KNIGHT_OUTPOST_BONUS",
         "BISHOP_FIANCHETTO_BONUS", "ROOK_ON_SEVENTH_BONUS", "ROOK_OPEN_FILE_BONUS",
@@ -71,7 +71,8 @@ def register_parameters():
         "PIGS_ON_SEVENTH_BONUS", "BATTERY_BONUS", "SPACE_BONUS_FACTOR",
         "INITIATIVE_FACTOR", "INITIATIVE_FLAT_BONUS",
         "CASTLING_BONUS",
-        "KNIGHT_SYNERGY_BONUS"  # <<< --- ADDED THE NEW PARAMETER HERE --- <<<
+        "KNIGHT_SYNERGY_BONUS",
+        "RELATIVE_PIN_PENALTY"  # <--- ADDED THE NEW PARAMETER HERE
     ]
     for const_name in scalar_constants:
         if hasattr(ai, const_name):
