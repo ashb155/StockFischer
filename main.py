@@ -7,6 +7,54 @@ import time
 import random
 from opening_book import get_polyglot_book_move
 
+
+def run_perft_tests():
+    print("\n--- Running Core Engine Integrity Test (Perft) ---")
+    test_game = Game()  # Create a clean game instance
+
+    # Expected nodes for the starting position (FEN: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1)
+    expected_nodes = {1: 20, 2: 400, 3: 8902, 4: 197281}
+
+    all_passed = True
+
+    for depth in range(1, 5):
+        start_time = time.time()
+
+        try:
+            nodes = test_game.perft(depth)
+            elapsed = time.time() - start_time
+            expected = expected_nodes.get(depth, 'N/A')
+
+            if nodes == expected:
+                status = "PASS ✅"
+            else:
+                status = f"FAIL ❌ (Expected: {expected})"
+                all_passed = False
+
+            print(f"Depth {depth}: Nodes={nodes} | Time={elapsed:.3f}s | {status}")
+
+        except Exception as e:
+            print(f"Depth {depth}: ERROR during Perft execution: {e} 🛑")
+            all_passed = False
+            break
+
+    print("-------------------------------------------------")
+    if all_passed:
+        print("PERFT SUCCESS: Core logic is verified. Ready for demo! 👍")
+    else:
+        print("PERFT FAILURE: Stop and debug move generation/undo logic! 🐞")
+    print("-------------------------------------------------")
+
+    return all_passed
+
+
+# Run the tests once at the start
+if not run_perft_tests():
+    # If the tests fail, you might want to exit the script before starting the game
+    print("Exiting due to failed Perft test.")
+    exit()
+
+# --- END OF PERFT TESTING BLOCK ---
 # --- Search Depth Mapping ---
 difficulty = {'easy': 2, 'medium': 3, "hard": 6}
 

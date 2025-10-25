@@ -428,9 +428,13 @@ class Game:
         self.w_king_pos = old_w_king
         self.b_king_pos = old_b_king
 
+        # FIX: Ensure key exists before attempting to decrement/delete
         key = self.board_key()
-        self.position_count[key] -= 1
-        if self.position_count[key] == 0: del self.position_count[key]
+        if key in self.position_count:
+            self.position_count[key] -= 1
+            if self.position_count[key] == 0:
+                del self.position_count[key]
+        # END FIX
 
         self.state = None
         if self.is_check(self.turn): self.state = "Check"
@@ -490,9 +494,59 @@ class Game:
             row = []
             for c in range(8):
                 p = self.board[r][c]
-                row.append(p.colour + p.name if p else ".")
+                # FIX: Ensure proper string for empty squares
+                row.append(str(p) if p else ".")
             rows.append("".join(row))
         return "/".join(rows) + " " + self.turn
+
+    def perft(self, depth):
+        """
+        Recursively calculates the number of legal leaf nodes at a given depth.
+        Used for testing the integrity of move generation and board state updates.
+        """
+        # Base Case: When depth reaches 0, we count the node
+        if depth == 0:
+            return 1
+
+        nodes = 0
+        current_colour = self.turn
+
+        # 1. Gather all legal moves for the current position
+        all_moves = []
+        for r_start in range(8):
+            for c_start in range(8):
+                piece = self.board[r_start][c_start]
+                if piece and piece.colour == current_colour:
+                    try:
+                        # get_moves returns the list of legal end squares
+                        legal_ends = self.get_moves(r_start, c_start)
+
+                        # Handle promotion options explicitly for each end square
+                        for r_end, c_end in legal_ends:
+                            if piece.name == 'P' and (r_end == 0 or r_end == 7):
+                                # If it's a promotion, list all promotion types
+                                for promo in ['Q', 'R', 'B', 'N']:
+                                    all_moves.append(((r_start, c_start), (r_end, c_end), promo))
+                            else:
+                                # Not a promotion
+                                all_moves.append(((r_start, c_start), (r_end, c_end), None))
+                    except Exception:
+                        # Skip if any piece/move function raises an unexpected error
+                        continue
+
+        # 2. Iterate and recurse through moves
+        for start, end, promotion in all_moves:
+
+            # Since get_moves already ensures the move is legal, make_move should return True
+            if self.make_move(start, end, promotion):
+                # Recursive call
+                nodes += self.perft(depth - 1)
+
+                # Unmake the move to restore the board for the next iteration
+                self.full_unmake_move()
+
+        return nodes
+    # --- END OF PERFT FUNCTION ---
 
 
 def notation_to_index(move):

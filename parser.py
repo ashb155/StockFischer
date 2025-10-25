@@ -29,7 +29,6 @@ def parser(move, game):
         piece_type = pieces[move[0]]
         move = move[1:]
 
-    # minimum notation length
     if len(move) < 2:
         return None, None, None
 
