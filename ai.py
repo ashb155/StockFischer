@@ -125,9 +125,9 @@ INITIATIVE_FACTOR = 3.0
 INITIATIVE_FLAT_BONUS = 20
 CASTLING_BONUS = 30
 KNIGHT_SYNERGY_BONUS = 25
-
-# --- NEW: Relative Pin Penalty ---
 RELATIVE_PIN_PENALTY = -35
+PIN_NEAR_KING_PENALTY = -60
+KING_EXPOSURE_PIN_PENALTY = -45
 
 # King attack weights (Tunable)
 king_attack_weights = {'Q': 5, 'R': 3, 'B': 2, 'N': 2, 'P': 1}
@@ -178,7 +178,10 @@ def _build_parameter_metadata():
         "PIGS_ON_SEVENTH_BONUS", "BATTERY_BONUS", "SPACE_BONUS_FACTOR",
         "INITIATIVE_FACTOR", "INITIATIVE_FLAT_BONUS", "CASTLING_BONUS",
         "KNIGHT_SYNERGY_BONUS",
-        "RELATIVE_PIN_PENALTY"  # <--- ADDED
+        "RELATIVE_PIN_PENALTY",
+        "PIN_NEAR_KING_PENALTY",
+        "KING_EXPOSURE_PIN_PENALTY"
+
     ]
     for const_name in scalar_constants:
         if const_name in current_globals: _register_param_meta(const_name, current_globals[const_name])
@@ -249,47 +252,48 @@ def board_to_internal_representation(board):
 
 
 # --- MODIFIED evaluate_board (NEW: Pin Detection Added) ---
-def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
-                   move_count=15):
-    score = 0;
-    white_pawns, black_pawns = [], [];
+def evaluate_board(internal_board, turn, castling_rights, enpassant_square, move_count=15):
+    score = 0
+    white_pawns, black_pawns = [], []
     white_bishops, black_bishops = [], []
     white_king_pos, black_king_pos = None, None
 
-    # --- Pre-evaluation setup (omitted detail) ---
-    for r_k in range(8):
-        for c_k in range(8):
-            p_k = internal_board[r_k][c_k]
-            if p_k and p_k.name == 'K':
-                if p_k.colour == 'w':
-                    white_king_pos = (r_k, c_k)
+    # --- Locate Kings ---
+    for r in range(8):
+        for c in range(8):
+            p = internal_board[r][c]
+            if p and p.name == 'K':
+                if p.colour == 'w':
+                    white_king_pos = (r, c)
                 else:
-                    black_king_pos = (r_k, c_k)
+                    black_king_pos = (r, c)
 
+    # --- Phase Calculation ---
     current_material = sum(PHASE_MATERIAL.get(p.name, 0) for row in internal_board for p in row if p)
     phase = max(0.0, min(1.0, 1.0 - (current_material / MAX_PHASE_MATERIAL))) if MAX_PHASE_MATERIAL > 0 else 0.5
 
+    # --- Pawn Attacks ---
     white_pawn_attacks, black_pawn_attacks = set(), set()
     for r in range(8):
         for c in range(8):
-            p = internal_board[r][c];
+            p = internal_board[r][c]
             if p and p.name == 'P':
-                dr, attack_set = (-1, white_pawn_attacks) if p.colour == 'w' else (1, black_pawn_attacks)
-                attack_r = r + dr
-                if 0 <= attack_r < 8:
-                    if c > 0: attack_set.add((attack_r, c - 1))
-                    if c < 7: attack_set.add((attack_r, c + 1))
+                dr, attacks = (-1, white_pawn_attacks) if p.colour == 'w' else (1, black_pawn_attacks)
+                if 0 <= r + dr < 8:
+                    if c > 0:
+                        attacks.add((r + dr, c - 1))
+                    if c < 7:
+                        attacks.add((r + dr, c + 1))
 
-    global king_zone_attack_count;
-    king_zone_attack_count = [0] * 2
+    # --- King Zone Attack Counts ---
+    global king_zone_attack_count
+    king_zone_attack_count = [0, 0]
     white_queen_pos, black_queen_pos = None, None
     white_rooks_bishops, black_rooks_bishops = [], []
     white_knights, black_knights = [], []
 
-    # --- Pin Detection Setup ---
+    # --- Pin Detection ---
     pinned_pieces = []
-
-    # Directions for sliding pieces (Rook: straight, Bishop: diagonal, Queen: both)
     ALL_DIRECTIONS = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
 
     for r_start in range(8):
@@ -297,61 +301,60 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
             pin_piece = internal_board[r_start][c_start]
             if not pin_piece or pin_piece.name not in ['R', 'B', 'Q']:
                 continue
-
             for dr, dc in ALL_DIRECTIONS:
-                r, c, found_friendly = r_start + dr, c_start + dc, False
+                r, c, found_enemy = r_start + dr, c_start + dc, False
                 pinned_pos = None
-
                 while 0 <= r < 8 and 0 <= c < 8:
                     current_piece = internal_board[r][c]
-
                     if current_piece:
                         if current_piece.colour == pin_piece.colour:
-                            # Found a friendly piece - cannot be a pin starter
                             break
-
-                        # Found an enemy piece (potential pinned piece)
-                        if not found_friendly:
-                            found_friendly = True
+                        if not found_enemy:
+                            found_enemy = True
                             pinned_pos = (r, c)
                         else:
-                            # Found a second enemy piece (potential shielded piece)
                             shielded_piece = current_piece
-
-                            if internal_board[pinned_pos[0]][pinned_pos[1]].name == 'K':  # Absolute pin
+                            pinned_piece = internal_board[pinned_pos[0]][pinned_pos[1]]
+                            if pinned_piece.name == 'K':  # absolute pin
+                                pinned_pieces.append(pinned_pos)
                                 break
-
-                            # Relative Pin: Pinned piece shields a piece *more* valuable (or Queen)
-                            pinned_piece_obj = internal_board[pinned_pos[0]][pinned_pos[1]]
-
-                            pinned_value = piece_values.get(pinned_piece_obj.name, 0)
+                            pinned_value = piece_values.get(pinned_piece.name, 0)
                             shielded_value = piece_values.get(shielded_piece.name, 0)
-
-                            # Check if Pinned piece is less valuable than Shielded piece (relative pin)
-                            if (shielded_value > pinned_value):
-                                # Check if the pin piece is capable of the pin (e.g., Bishop on diagonal)
-                                if (pin_piece.name == 'R' and dr * dc != 0): break  # Rook on diagonal
-                                if (pin_piece.name == 'B' and dr * dc == 0): break  # Bishop on straight
-
-                                if pinned_pos not in pinned_pieces:
-                                    pinned_pieces.append(pinned_pos)
-                                break
-
-                            # If shielded piece is less valuable/same value or pin is not strong, stop the ray
+                            if shielded_value > pinned_value:
+                                if (pin_piece.name == 'R' and dr * dc != 0) or (pin_piece.name == 'B' and dr * dc == 0):
+                                    break
+                                pinned_pieces.append(pinned_pos)
                             break
-                    r += dr;
+                    r += dr
                     c += dc
 
-    # --- Main Evaluation Loop ---
+    # --- Extra King Safety Pin Penalties ---
+    for (r, c) in pinned_pieces:
+        pinned_piece = internal_board[r][c]
+        if not pinned_piece:
+            continue
+        king_pos = white_king_pos if pinned_piece.colour == 'w' else black_king_pos
+        if king_pos:
+            kr, kc = king_pos
+            dist = max(abs(r - kr), abs(c - kc))
+            # 1️⃣ Pin near king (within 2 squares)
+            if dist <= 2:
+                score += (PIN_NEAR_KING_PENALTY if pinned_piece.colour == 'w' else -PIN_NEAR_KING_PENALTY)
+            # 2️⃣ Pin along same file/rank/diagonal
+            same_line = (r == kr) or (c == kc) or (abs(r - kr) == abs(c - kc))
+            if same_line:
+                score += (KING_EXPOSURE_PIN_PENALTY if pinned_piece.colour == 'w' else -KING_EXPOSURE_PIN_PENALTY)
+
+    # --- Piece Evaluation Loop ---
     for row in range(8):
         for col in range(8):
-            piece = internal_board[row][col];
-            if not piece: continue
+            piece = internal_board[row][col]
+            if not piece:
+                continue
             val = piece_values.get(piece.name, 0)
             index = (row * 8 + col, (7 - row) * 8 + col)[piece.colour == 'b']
-            if not (0 <= index < 64): continue
 
-            # --- PST and King Eval ---
+            # PSTs
             try:
                 if piece.name == 'P':
                     val += pawn_table[index]
@@ -368,53 +371,58 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
             except IndexError:
                 pass
 
-            # --- KNIGHT/BISHOP/ROOK LOGIC (Outposts, Fianchetto, Ranks) ---
+            # --- Knight Outposts ---
             if piece.name == 'N':
-                # --- Original Knight Outpost Logic ---
-                is_s, is_a = False, False;
+                is_s, is_a = False, False
                 s_r, a_r = (row + (-1, 1)[piece.colour == 'b'], row + (1, -1)[piece.colour == 'b'])
                 if 0 <= s_r < 8:
                     for dc in (-1, 1):
-                        sc = col + dc;
-                        if 0 <= sc < 8 and (
-                                p := internal_board[s_r][
-                                    sc]) and p.name == 'P' and p.colour == piece.colour: is_s = True; break
+                        sc = col + dc
+                        if 0 <= sc < 8 and (p := internal_board[s_r][sc]) and p.name == 'P' and p.colour == piece.colour:
+                            is_s = True
+                            break
                 if 0 <= a_r < 8:
                     for dc in (-1, 1):
-                        ac = col + dc;
-                        if 0 <= ac < 8 and (
-                                p := internal_board[a_r][
-                                    ac]) and p.name == 'P' and p.colour != piece.colour: is_a = True; break
-                if is_s and not is_a: val += KNIGHT_OUTPOST_BONUS
+                        ac = col + dc
+                        if 0 <= ac < 8 and (p := internal_board[a_r][ac]) and p.name == 'P' and p.colour != piece.colour:
+                            is_a = True
+                            break
+                if is_s and not is_a:
+                    val += KNIGHT_OUTPOST_BONUS
                 (white_knights, black_knights)[piece.colour == 'b'].append((row, col))
+
             elif piece.name == 'B':
                 (white_bishops, black_bishops)[piece.colour == 'b'].append((row, col))
                 (white_rooks_bishops, black_rooks_bishops)[piece.colour == 'b'].append((piece.name, (row, col)))
-                if (piece.colour == 'w' and (row, col) in ((6, 1), (6, 6))) or (
-                        piece.colour == 'b' and (row, col) in ((1, 1), (1, 6))): val += BISHOP_FIANCHETTO_BONUS
+                if (piece.colour == 'w' and (row, col) in [(6, 1), (6, 6)]) or (
+                        piece.colour == 'b' and (row, col) in [(1, 1), (1, 6)]):
+                    val += BISHOP_FIANCHETTO_BONUS
+
             elif piece.name == 'R':
                 (white_rooks_bishops, black_rooks_bishops)[piece.colour == 'b'].append((piece.name, (row, col)))
-                if (piece.colour == 'w' and row == 1) or (
-                        piece.colour == 'b' and row == 6): val += ROOK_ON_SEVENTH_BONUS
-                ffp = any(
-                    (p := internal_board[r][col]) and p.name == 'P' and p.colour == piece.colour for r in range(8))
+                if (piece.colour == 'w' and row == 1) or (piece.colour == 'b' and row == 6):
+                    val += ROOK_ON_SEVENTH_BONUS
+                ffp = any((p := internal_board[r][col]) and p.name == 'P' and p.colour == piece.colour for r in range(8))
                 if not ffp:
-                    fep = any(
-                        (p := internal_board[r][col]) and p.name == 'P' and p.colour != piece.colour for r in range(8))
+                    fep = any((p := internal_board[r][col]) and p.name == 'P' and p.colour != piece.colour for r in range(8))
                     val += (ROOK_SEMI_OPEN_FILE_BONUS, ROOK_OPEN_FILE_BONUS)[not fep]
+
             elif piece.name == 'Q':
                 if piece.colour == 'w':
                     white_queen_pos = (row, col)
                 else:
                     black_queen_pos = (row, col)
-            if piece.name == 'P': (white_pawns, black_pawns)[piece.colour == 'b'].append((row, col))
 
-            # --- NEW: Apply Relative Pin Penalty ---
+            if piece.name == 'P':
+                (white_pawns, black_pawns)[piece.colour == 'b'].append((row, col))
+
+            # Apply pin penalties
             if (row, col) in pinned_pieces:
                 val += RELATIVE_PIN_PENALTY
 
             score += val * (1, -1)[piece.colour == 'b']
 
+            # --- King attack weighting ---
             if piece.name != 'K':
                 ekp = (black_king_pos, white_king_pos)[piece.colour == 'b']
                 if ekp:
@@ -423,101 +431,87 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
                         aw = king_attack_weights.get(piece.name, 0)
                         ab = aw * (4 - dist) * (1 + phase / 2)
                         score += int(ab * (1, -1)[piece.colour == 'b'])
-                        ki = (1, 0)[piece.colour == 'b'];
+                        ki = (1, 0)[piece.colour == 'b']
                         king_zone_attack_count[ki] += aw
 
-    # --- Pawn Structure (omitted detail) ---
+    # --- Pawn Structure ---
     def pawn_structure(pawns, colour):
-        bonus = 0;
+        bonus = 0
         files = [0] * 8
-        try:
-            for r, c in pawns:
-                if 0 <= c < 8: files[c] += 1
-        except (TypeError, ValueError):
-            return 0
+        for r, c in pawns:
+            files[c] += 1
         for f in range(8):
-            if files[f] > 1: bonus += DOUBLED_PAWN_PENALTY * (files[f] - 1)
-            ln = files[f - 1] if f > 0 else 0;
+            if files[f] > 1:
+                bonus += DOUBLED_PAWN_PENALTY * (files[f] - 1)
+            ln = files[f - 1] if f > 0 else 0
             rn = files[f + 1] if f < 7 else 0
-            if files[f] > 0 and ln == 0 and rn == 0: bonus += ISOLATED_PAWN_PENALTY
+            if files[f] > 0 and ln == 0 and rn == 0:
+                bonus += ISOLATED_PAWN_PENALTY
+        # Chains, backward, passed
         for r, c in pawns:
             s_dir, s_r = (1, -1)[colour == 'b'], r + (1, -1)[colour == 'b']
             if 0 <= s_r < 8:
-                if c > 0 and (
-                        p := internal_board[s_r][
-                            c - 1]) and p.name == 'P' and p.colour == colour: bonus += PAWN_CHAIN_BONUS
-                if c < 7 and (
-                        p := internal_board[s_r][
-                            c + 1]) and p.name == 'P' and p.colour == colour: bonus += PAWN_CHAIN_BONUS
-            b_dir, is_bwd = s_dir, True
+                if c > 0 and (p := internal_board[s_r][c - 1]) and p.name == 'P' and p.colour == colour:
+                    bonus += PAWN_CHAIN_BONUS
+                if c < 7 and (p := internal_board[s_r][c + 1]) and p.name == 'P' and p.colour == colour:
+                    bonus += PAWN_CHAIN_BONUS
+            # backward pawn check
+            b_dir = s_dir
+            is_bwd = True
             for dc in (-1, 1):
-                if not 0 <= c + dc < 8: continue
-                cr, fs = r + b_dir, False
-                while 0 <= cr < 8:
-                    if (p := internal_board[cr][c + dc]) and p.name == 'P' and p.colour == colour: fs = True; break
-                    cr += b_dir
-                if fs: is_bwd = False; break
+                if 0 <= c + dc < 8:
+                    cr = r + b_dir
+                    while 0 <= cr < 8:
+                        if (p := internal_board[cr][c + dc]) and p.name == 'P' and p.colour == colour:
+                            is_bwd = False
+                            break
+                        cr += b_dir
+                if not is_bwd:
+                    break
             if is_bwd:
-                stop = False;
                 ar = r - b_dir
+                stop = False
                 if 0 <= ar < 8:
                     for da in (-1, 1):
-                        if 0 <= c + da < 8 and (
-                                p := internal_board[ar][
-                                    c + da]) and p.name == 'P' and p.colour != colour: stop = True; break
-                if stop: bonus += BACKWARD_PAWN_PENALTY
-            is_pass, p_dir, curr_r = True, (-1, 1)[colour == 'b'], r + (-1, 1)[colour == 'b']
+                        if 0 <= c + da < 8 and (p := internal_board[ar][c + da]) and p.name == 'P' and p.colour != colour:
+                            stop = True
+                            break
+                if stop:
+                    bonus += BACKWARD_PAWN_PENALTY
+            # passed pawn
+            is_pass = True
+            p_dir = (-1, 1)[colour == 'b']
+            curr_r = r + (-1, 1)[colour == 'b']
             while 0 <= curr_r < 8:
                 for dp in (-1, 0, 1):
-                    if 0 <= c + dp < 8 and (p := internal_board[curr_r][
-                        c + dp]) and p.name == 'P' and p.colour != colour: is_pass = False; break
-                if not is_pass: break
+                    if 0 <= c + dp < 8 and (p := internal_board[curr_r][c + dp]) and p.name == 'P' and p.colour != colour:
+                        is_pass = False
+                        break
+                if not is_pass:
+                    break
                 curr_r += p_dir
             if is_pass:
                 rank = (6 - r, r - 1)[colour == 'b']
-                if 0 <= rank < len(PASSED_PAWN_BONUS_RANKS): bonus += PASSED_PAWN_BONUS_RANKS[rank]
+                if 0 <= rank < len(PASSED_PAWN_BONUS_RANKS):
+                    bonus += PASSED_PAWN_BONUS_RANKS[rank]
                 clear = all(internal_board[cr][c] is None for cr in range(r + p_dir, (-1, 8)[colour == 'b'], p_dir))
-                if clear: bonus += rank * PASSED_PAWN_PATH_CLEAR_FACTOR
-                s_r = r + b_dir;
-                conn = False
-                if 0 <= s_r < 8:
-                    for dc in (-1, 1):
-                        if 0 <= c + dc < 8 and (
-                                p := internal_board[s_r][
-                                    c + dc]) and p.name == 'P' and p.colour == colour: conn = True; break
-                if conn: bonus += PASSED_PAWN_CONNECTED_BONUS
-                bl_r = r + p_dir
-                if 0 <= bl_r < 8 and (b := internal_board[bl_r][c]) and b.colour != colour:
-                    bonus += {'N': PASSED_PAWN_BLOCKER_N_PENALTY, 'B': PASSED_PAWN_BLOCKER_B_PENALTY}.get(b.name,
-                                                                                                          PASSED_PAWN_BLOCKER_OTHER_PENALTY)
-                r_r = r + b_dir
-                while 0 <= r_r < 8:
-                    if p := internal_board[r_r][c]:
-                        if p.name == 'R' and p.colour == colour: bonus += ROOK_BEHIND_PASSED_PAWN_BONUS
-                        break
-                    r_r += b_dir
-                rf_r = r + p_dir
-                while 0 <= rf_r < 8:
-                    if p := internal_board[rf_r][c]:
-                        if p.name == 'R' and p.colour != colour: bonus += ENEMY_ROOK_IN_FRONT_PASSED_PAWN_PENALTY
-                        break
-                    rf_r += p_dir
+                if clear:
+                    bonus += rank * PASSED_PAWN_PATH_CLEAR_FACTOR
         return bonus
 
     score += pawn_structure(white_pawns, 'w')
     score -= pawn_structure(black_pawns, 'b')
 
-    # --- Bad Bishop (omitted detail) ---
-    wp_lc, wp_dc, bp_lc, bp_dc = 0, 0, 0, 0;
-    cf = {2, 3, 4, 5}
+    # --- Bad Bishop and Bishop Pair ---
+    wp_lc = wp_dc = bp_lc = bp_dc = 0
     for r, c in white_pawns:
-        if c in cf:
+        if c in range(2, 6):
             if (r + c) % 2 == 0:
                 wp_lc += 1
             else:
                 wp_dc += 1
     for r, c in black_pawns:
-        if c in cf:
+        if c in range(2, 6):
             if (r + c) % 2 == 0:
                 bp_lc += 1
             else:
@@ -525,128 +519,149 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
     bbp = 0
     for r, c in white_bishops:
         idx = (r + c) % 2
-        if idx in (0, 1): bbp += (wp_lc, wp_dc)[idx] * BAD_BISHOP_FACTOR
+        bbp += (wp_lc, wp_dc)[idx] * BAD_BISHOP_FACTOR
     for r, c in black_bishops:
         idx = (r + c) % 2
-        if idx in (0, 1): bbp -= (bp_lc, bp_dc)[idx] * BAD_BISHOP_FACTOR
+        bbp -= (bp_lc, bp_dc)[idx] * BAD_BISHOP_FACTOR
     score += bbp
+    if len(white_bishops) >= 2:
+        score += BISHOP_PAIR_BONUS
+    if len(black_bishops) >= 2:
+        score -= BISHOP_PAIR_BONUS
 
-    # --- Bishop Pair (omitted detail) ---
-    if len(white_bishops) >= 2: score += BISHOP_PAIR_BONUS
-    if len(black_bishops) >= 2: score -= BISHOP_PAIR_BONUS
-
-    # --- Knight Synergy/Mutual Support (omitted detail) ---
+    # --- Knight Synergy ---
     def check_knight_synergy(knights):
         bonus = 0
-        if len(knights) < 2: return 0
-        knight_deltas = [(-2, -1), (-2, 1), (-1, -2), (-1, 2), (1, -2), (1, 2), (2, -1), (2, 1)]
+        if len(knights) < 2:
+            return 0
         for i in range(len(knights)):
             for j in range(i + 1, len(knights)):
-                r1, c1 = knights[i];
+                r1, c1 = knights[i]
                 r2, c2 = knights[j]
                 dr, dc = abs(r1 - r2), abs(c1 - c2)
                 is_mutual_support = (dr == 1 and dc == 2) or (dr == 2 and dc == 1)
-                is_central = r1 in range(2, 6) and c1 in range(2, 6) and r2 in range(2, 6) and c2 in range(2, 6)
-                if is_mutual_support and is_central: bonus += KNIGHT_SYNERGY_BONUS
+                is_central = all(2 <= x < 6 for x in (r1, c1, r2, c2))
+                if is_mutual_support and is_central:
+                    bonus += KNIGHT_SYNERGY_BONUS
         return bonus
 
     score += check_knight_synergy(white_knights)
     score -= check_knight_synergy(black_knights)
 
-    # --- King Safety (omitted detail) ---
+    # --- King Safety ---
     def king_safety(colour, king_pos, num_attackers):
-        if king_pos is None: return 0
-        kr, kc = king_pos;
-        sb, sp = 0, 0;
+        if king_pos is None:
+            return 0
+        kr, kc = king_pos
+        sb = sp = 0
         sd = (-1, 1)[colour == 'b']
         for dc in (-1, 0, 1):
-            cc = kc + dc;
-            if not 0 <= cc < 8: continue
-            fpp, epp = False, False;
+            cc = kc + dc
+            if not 0 <= cc < 8:
+                continue
+            fpp = epp = False
             r1 = kr + sd
-            if 0 <= r1 < 8 and (p := internal_board[r1][
-                cc]) and p.name == 'P' and p.colour == colour: sb += KING_SHIELD_RANK1_BONUS; fpp = True
+            if 0 <= r1 < 8 and (p := internal_board[r1][cc]) and p.name == 'P' and p.colour == colour:
+                sb += KING_SHIELD_RANK1_BONUS
+                fpp = True
             r2 = kr + 2 * sd
-            if 0 <= r2 < 8 and (p := internal_board[r2][
-                cc]) and p.name == 'P' and p.colour == colour: sb += KING_SHIELD_RANK2_BONUS; fpp = True
+            if 0 <= r2 < 8 and (p := internal_board[r2][cc]) and p.name == 'P' and p.colour == colour:
+                sb += KING_SHIELD_RANK2_BONUS
+                fpp = True
             for r_chk in range(8):
                 if (p := internal_board[r_chk][cc]) and p.name == 'P' and p.colour != colour:
-                    epp = True;
+                    epp = True
                     rank = (6 - r_chk, r_chk - 1)[p.colour == 'b']
-                    if rank >= 3: sp += rank * KING_STORM_FACTOR
-            if not fpp: sp += (KING_SEMI_OPEN_PENALTY, KING_OPEN_PENALTY)[not epp]
+                    if rank >= 3:
+                        sp += rank * KING_STORM_FACTOR
+            if not fpp:
+                sp += (KING_SEMI_OPEN_PENALTY, KING_OPEN_PENALTY)[not epp]
         adp = num_attackers ** 2 * KING_ATTACK_FACTOR
         return sb + min(0, sp) + min(0, adp)
 
-    if white_king_pos: score += int(king_safety('w', white_king_pos, king_zone_attack_count[0]) * (1 - phase))
-    if black_king_pos: score -= int(king_safety('b', black_king_pos, king_zone_attack_count[1]) * (1 - phase))
+    if white_king_pos:
+        score += int(king_safety('w', white_king_pos, king_zone_attack_count[0]) * (1 - phase))
+    if black_king_pos:
+        score -= int(king_safety('b', black_king_pos, king_zone_attack_count[1]) * (1 - phase))
 
-    # --- Connected Rooks (omitted detail) ---
-    wr = [(r, c) for r in range(8) for c in range(8) if
-          (p := internal_board[r][c]) and p.name == 'R' and p.colour == 'w']
-    br = [(r, c) for r in range(8) for c in range(8) if
-          (p := internal_board[r][c]) and p.name == 'R' and p.colour == 'b']
+    # --- Connected Rooks ---
+    wr = [(r, c) for r in range(8) for c in range(8)
+          if (p := internal_board[r][c]) and p.name == 'R' and p.colour == 'w']
+    br = [(r, c) for r in range(8) for c in range(8)
+          if (p := internal_board[r][c]) and p.name == 'R' and p.colour == 'b']
     if len(wr) >= 2:
-        r1, c1 = wr[0];
+        r1, c1 = wr[0]
         r2, c2 = wr[1]
         if (r1 == r2 and all(internal_board[r1][c] is None for c in range(min(c1, c2) + 1, max(c1, c2)))) or \
-                (c1 == c2 and all(internal_board[r][c1] is None for r in
-                                  range(min(r1, r2) + 1, max(r1, r2)))): score += CONNECTED_ROOKS_BONUS
+           (c1 == c2 and all(internal_board[r][c1] is None for r in range(min(r1, r2) + 1, max(r1, r2)))):
+            score += CONNECTED_ROOKS_BONUS
     if len(br) >= 2:
-        r1, c1 = br[0];
+        r1, c1 = br[0]
         r2, c2 = br[1]
         if (r1 == r2 and all(internal_board[r1][c] is None for c in range(min(c1, c2) + 1, max(c1, c2)))) or \
-                (c1 == c2 and all(internal_board[r][c1] is None for r in
-                                  range(min(r1, r2) + 1, max(r1, r2)))): score -= CONNECTED_ROOKS_BONUS
+           (c1 == c2 and all(internal_board[r][c1] is None for r in range(min(r1, r2) + 1, max(r1, r2)))):
+            score -= CONNECTED_ROOKS_BONUS
 
-    # --- Undeveloped Pieces & Castling Bonus (omitted detail) ---
+    # --- Development & Castling ---
     if move_count > 4:
         up = 0
-        if internal_board[7][1] and internal_board[7][1].name == 'N': up += UNDEVELOPED_MINOR_PENALTY
-        if internal_board[7][2] and internal_board[7][2].name == 'B': up += UNDEVELOPED_MINOR_PENALTY
-        if internal_board[7][5] and internal_board[7][5].name == 'B': up += UNDEVELOPED_MINOR_PENALTY
-        if internal_board[7][6] and internal_board[7][6].name == 'N': up += UNDEVELOPED_MINOR_PENALTY
+        if internal_board[7][1] and internal_board[7][1].name == 'N':
+            up += UNDEVELOPED_MINOR_PENALTY
+        if internal_board[7][2] and internal_board[7][2].name == 'B':
+            up += UNDEVELOPED_MINOR_PENALTY
+        if internal_board[7][5] and internal_board[7][5].name == 'B':
+            up += UNDEVELOPED_MINOR_PENALTY
+        if internal_board[7][6] and internal_board[7][6].name == 'N':
+            up += UNDEVELOPED_MINOR_PENALTY
         white_castled = False
         if castling_rights.get('wKR') or castling_rights.get('wQR'):
-            if internal_board[7][7] and internal_board[7][7].name == 'R': up += UNDEVELOPED_ROOK_PENALTY
-            if internal_board[7][0] and internal_board[7][0].name == 'R': up += UNDEVELOPED_ROOK_PENALTY
+            if internal_board[7][7] and internal_board[7][7].name == 'R':
+                up += UNDEVELOPED_ROOK_PENALTY
+            if internal_board[7][0] and internal_board[7][0].name == 'R':
+                up += UNDEVELOPED_ROOK_PENALTY
             up += KING_NOT_CASTLED_PENALTY
         elif white_king_pos in [(7, 6), (7, 2)]:
-            white_castled = True; score += CASTLING_BONUS
-        if internal_board[0][1] and internal_board[0][1].name == 'N': up -= UNDEVELOPED_MINOR_PENALTY
-        if internal_board[0][2] and internal_board[0][2].name == 'B': up -= UNDEVELOPED_MINOR_PENALTY
-        if internal_board[0][5] and internal_board[0][5].name == 'B': up -= UNDEVELOPED_MINOR_PENALTY
-        if internal_board[0][6] and internal_board[0][6].name == 'N': up -= UNDEVELOPED_MINOR_PENALTY
+            white_castled = True
+            score += CASTLING_BONUS
+        if internal_board[0][1] and internal_board[0][1].name == 'N':
+            up -= UNDEVELOPED_MINOR_PENALTY
+        if internal_board[0][2] and internal_board[0][2].name == 'B':
+            up -= UNDEVELOPED_MINOR_PENALTY
+        if internal_board[0][5] and internal_board[0][5].name == 'B':
+            up -= UNDEVELOPED_MINOR_PENALTY
+        if internal_board[0][6] and internal_board[0][6].name == 'N':
+            up -= UNDEVELOPED_MINOR_PENALTY
         black_castled = False
         if castling_rights.get('bKR') or castling_rights.get('bQR'):
-            if internal_board[0][7] and internal_board[0][7].name == 'R': up -= UNDEVELOPED_ROOK_PENALTY
-            if internal_board[0][0] and internal_board[0][0].name == 'R': up -= UNDEVELOPED_ROOK_PENALTY
+            if internal_board[0][7] and internal_board[0][7].name == 'R':
+                up -= UNDEVELOPED_ROOK_PENALTY
+            if internal_board[0][0] and internal_board[0][0].name == 'R':
+                up -= UNDEVELOPED_ROOK_PENALTY
             up -= KING_NOT_CASTLED_PENALTY
         elif black_king_pos in [(0, 6), (0, 2)]:
-            black_castled = True; score -= CASTLING_BONUS
+            black_castled = True
+            score -= CASTLING_BONUS
         score += up
         if move_count > 10:
-            if white_king_pos == (7, 4) and not white_castled and (
-                    castling_rights.get('wKR') or castling_rights.get('wQR')): score += int(
-                KING_STUCK_CENTER_PENALTY * (1 - phase))
-            if black_king_pos == (0, 4) and not black_castled and (
-                    castling_rights.get('bKR') or castling_rights.get('bQR')): score -= int(
-                KING_STUCK_CENTER_PENALTY * (1 - phase))
+            if white_king_pos == (7, 4) and not white_castled and (castling_rights.get('wKR') or castling_rights.get('wQR')):
+                score += int(KING_STUCK_CENTER_PENALTY * (1 - phase))
+            if black_king_pos == (0, 4) and not black_castled and (castling_rights.get('bKR') or castling_rights.get('bQR')):
+                score -= int(KING_STUCK_CENTER_PENALTY * (1 - phase))
 
-    # --- Central Control (omitted detail) ---
-    center = [(r, c) for r in range(2, 6) for c in range(2, 6)]
-    for r, c in center:
-        if p := internal_board[r][c]:
-            bonus = (CENTER_CONTROL_BONUS, CENTER_CONTROL_BONUS // 2)[not (r in (3, 4) and c in (3, 4))]
-            score += bonus * (1, -1)[p.colour == 'b']
+    # --- Center Control ---
+    for r in range(2, 6):
+        for c in range(2, 6):
+            if (p := internal_board[r][c]):
+                bonus = (CENTER_CONTROL_BONUS, CENTER_CONTROL_BONUS // 2)[not (r in (3, 4) and c in (3, 4))]
+                score += bonus * (1, -1)[p.colour == 'b']
 
-    # --- Pigs on 7th (omitted detail) ---
-    if sum(1 for c in range(8) if
-           (p := internal_board[1][c]) and p.name == 'R' and p.colour == 'w') >= 2: score += PIGS_ON_SEVENTH_BONUS
-    if sum(1 for c in range(8) if
-           (p := internal_board[6][c]) and p.name == 'R' and p.colour == 'b') >= 2: score -= PIGS_ON_SEVENTH_BONUS
+    # --- Pigs on 7th ---
+    if sum(1 for c in range(8) if (p := internal_board[1][c]) and p.name == 'R' and p.colour == 'w') >= 2:
+        score += PIGS_ON_SEVENTH_BONUS
+    if sum(1 for c in range(8) if (p := internal_board[6][c]) and p.name == 'R' and p.colour == 'b') >= 2:
+        score -= PIGS_ON_SEVENTH_BONUS
 
-    # --- Battery Bonus (omitted detail) ---
+    # --- Battery ---
     bb = 0
     if white_queen_pos:
         qr, qc = white_queen_pos
@@ -655,18 +670,22 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
             if pn == 'R' and (qr == pr or qc == pc):
                 lc = (qr == pr and all(internal_board[qr][c] is None for c in range(min(qc, pc) + 1, max(qc, pc)))) or \
                      (qc == pc and all(internal_board[r][qc] is None for r in range(min(qr, pr) + 1, max(qr, pr))))
-                if lc: is_bat = True
+                if lc:
+                    is_bat = True
             elif pn == 'B' and abs(qr - pr) == abs(qc - pc):
-                dr, dc = (1, -1)[pr < qr], (1, -1)[pc < qc];
-                rr, cc = qr + dr, qc + dc;
+                dr, dc = (1, -1)[pr < qr], (1, -1)[pc < qc]
+                rr, cc = qr + dr, qc + dc
                 path_clear = True
                 while (rr, cc) != (pr, pc):
-                    if not (0 <= rr < 8 and 0 <= cc < 8): path_clear = False; break
-                    if internal_board[rr][cc]: path_clear = False; break
-                    rr += dr;
+                    if not (0 <= rr < 8 and 0 <= cc < 8) or internal_board[rr][cc]:
+                        path_clear = False
+                        break
+                    rr += dr
                     cc += dc
-                if path_clear: is_bat = True
-            if is_bat: bb += BATTERY_BONUS
+                if path_clear:
+                    is_bat = True
+            if is_bat:
+                bb += BATTERY_BONUS
     if black_queen_pos:
         qr, qc = black_queen_pos
         for pn, (pr, pc) in black_rooks_bishops:
@@ -674,31 +693,35 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
             if pn == 'R' and (qr == pr or qc == pc):
                 lc = (qr == pr and all(internal_board[qr][c] is None for c in range(min(qc, pc) + 1, max(qc, pc)))) or \
                      (qc == pc and all(internal_board[r][qc] is None for r in range(min(qr, pr) + 1, max(qr, pr))))
-                if lc: is_bat = True
+                if lc:
+                    is_bat = True
             elif pn == 'B' and abs(qr - pr) == abs(qc - pc):
-                dr, dc = (1, -1)[pr < qr], (1, -1)[pc < qc];
-                rr, cc = qr + dr, qc + dc;
+                dr, dc = (1, -1)[pr < qr], (1, -1)[pc < qc]
+                rr, cc = qr + dr, qc + dc
                 path_clear = True
                 while (rr, cc) != (pr, pc):
-                    if not (0 <= rr < 8 and 0 <= cc < 8): path_clear = False; break
-                    if internal_board[rr][cc]: path_clear = False; break
-                    rr += dr;
+                    if not (0 <= rr < 8 and 0 <= cc < 8) or internal_board[rr][cc]:
+                        path_clear = False
+                        break
+                    rr += dr
                     cc += dc
-                if path_clear: is_bat = True
-            if is_bat: bb -= BATTERY_BONUS
+                if path_clear:
+                    is_bat = True
+            if is_bat:
+                bb -= BATTERY_BONUS
     score += bb
 
-    # --- Space Control (omitted detail) ---
-    sb = 0
+    # --- Space Control ---
     for r in (4, 5, 6):
         for c in (2, 3, 4, 5):
-            if (r, c) not in black_pawn_attacks: sb += SPACE_BONUS_FACTOR
+            if (r, c) not in black_pawn_attacks:
+                score += SPACE_BONUS_FACTOR
     for r in (1, 2, 3):
         for c in (2, 3, 4, 5):
-            if (r, c) not in white_pawn_attacks: sb -= SPACE_BONUS_FACTOR
-    score += sb
+            if (r, c) not in white_pawn_attacks:
+                score -= SPACE_BONUS_FACTOR
 
-    # --- Initiative (omitted detail) ---
+    # --- Initiative ---
     init_diff = king_zone_attack_count[0] - king_zone_attack_count[1]
     score += int(init_diff * INITIATIVE_FACTOR * (1 - phase))
     if init_diff > 0:
@@ -706,10 +729,11 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
     elif init_diff < 0:
         score -= int(INITIATIVE_FLAT_BONUS * (1 - phase))
 
-    # --- Tempo (omitted detail) ---
+    # --- Tempo ---
     score += TEMPO_BONUS * (1, -1)[turn == 'b']
 
     return int(score)
+
 
 
 # --- NEW FUNCTION: evaluate_board_fen (no change) ---
@@ -1138,4 +1162,5 @@ def minimax_sse(game, depth, alpha, beta, maximizing, original_depth=None,
     if abs(final_score) > MATE_SCORE_THRESHOLD:
         sign = np.sign(final_score)
         final_score = sign * (MATE_VALUE - ply)
+
     return best_move_found if depth == original_depth else final_score

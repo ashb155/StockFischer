@@ -39,7 +39,7 @@ def register_parameters():
         "king_eg": ai.king_endgame_table
     }
     for name, table_ref in tables.items():
-        if isinstance(table_ref, list) and len(table_ref) == 64:  # Safety check
+        if isinstance(table_ref, list) and len(table_ref) == 64:
             for i in range(64):
                 add_param(f"{name}_pst_{i}", table_ref[i], original_ref=table_ref, index=i)
         else:
@@ -49,12 +49,12 @@ def register_parameters():
     if isinstance(ai.piece_values, dict):
         for piece_name in ['P', 'N', 'B', 'R', 'Q']:
             if piece_name in ai.piece_values:
-                add_param(f"value_{piece_name}", ai.piece_values[piece_name], original_ref=ai.piece_values,
-                          index=piece_name)
+                add_param(f"value_{piece_name}", ai.piece_values[piece_name],
+                          original_ref=ai.piece_values, index=piece_name)
     else:
         print("Warning: ai.piece_values not found or not a dict. Skipping.")
 
-    # Register scalar bonuses (Add ALL tunable constants)
+    # Register scalar bonuses (including NEW PIN parameters)
     scalar_constants = [
         "MOBILITY_BONUS", "CENTER_CONTROL_BONUS", "TEMPO_BONUS", "KNIGHT_OUTPOST_BONUS",
         "BISHOP_FIANCHETTO_BONUS", "ROOK_ON_SEVENTH_BONUS", "ROOK_OPEN_FILE_BONUS",
@@ -69,11 +69,11 @@ def register_parameters():
         "UNDEVELOPED_MINOR_PENALTY", "UNDEVELOPED_ROOK_PENALTY",
         "KING_NOT_CASTLED_PENALTY", "KING_STUCK_CENTER_PENALTY",
         "PIGS_ON_SEVENTH_BONUS", "BATTERY_BONUS", "SPACE_BONUS_FACTOR",
-        "INITIATIVE_FACTOR", "INITIATIVE_FLAT_BONUS",
-        "CASTLING_BONUS",
+        "INITIATIVE_FACTOR", "INITIATIVE_FLAT_BONUS", "CASTLING_BONUS",
         "KNIGHT_SYNERGY_BONUS",
-        "RELATIVE_PIN_PENALTY"  # <--- ADDED THE NEW PARAMETER HERE
+        "RELATIVE_PIN_PENALTY", "PIN_NEAR_KING_PENALTY", "KING_EXPOSURE_PIN_PENALTY"
     ]
+
     for const_name in scalar_constants:
         if hasattr(ai, const_name):
             add_param(const_name, getattr(ai, const_name))
@@ -85,15 +85,15 @@ def register_parameters():
             ai.PASSED_PAWN_BONUS_RANKS) == 7:
         for i in range(len(ai.PASSED_PAWN_BONUS_RANKS)):
             add_param(f"PASSED_PAWN_BONUS_RANK_{i}", ai.PASSED_PAWN_BONUS_RANKS[i],
-                      original_ref=ai.PASSED_PAWN_BONUS_RANKS,
-                      index=i)
+                      original_ref=ai.PASSED_PAWN_BONUS_RANKS, index=i)
     else:
         print("Warning: PASSED_PAWN_BONUS_RANKS not found, not a list, or not size 7 in ai.py. Skipping.")
 
     # Register King Attack Weights dictionary
     if hasattr(ai, 'king_attack_weights') and isinstance(ai.king_attack_weights, dict):
         for piece_name, value in ai.king_attack_weights.items():
-            add_param(f"king_attack_{piece_name}", value, original_ref=ai.king_attack_weights, index=piece_name)
+            add_param(f"king_attack_{piece_name}", value,
+                      original_ref=ai.king_attack_weights, index=piece_name)
     else:
         print("Warning: king_attack_weights not found or not a dict in ai.py. Skipping.")
 
@@ -109,7 +109,6 @@ def load_params_into_engine(theta):
     for i, name in enumerate(param_names):
         value = theta[i]
 
-        # Check if it's part of an original list/dict
         if name in param_original_refs:
             original_ref, index = param_original_refs[name]
             try:
@@ -117,28 +116,19 @@ def load_params_into_engine(theta):
                     original_ref[index] = int(round(value))
                 elif isinstance(original_ref, dict) and index in original_ref:
                     original_ref[index] = int(round(value))
-            except IndexError:
-                print(f"Warning: Index {index} out of bounds for {name} during parameter loading.")
-            except KeyError:
-                print(f"Warning: Key {index} not found for {name} during parameter loading.")
-            except TypeError:
-                print(f"Warning: Type error for {name}, index {index} during loading.")
-
+            except Exception as e:
+                print(f"Warning while loading {name}: {e}")
         else:
-            # It's a scalar global constant in ai module
             if hasattr(ai, name):
                 is_float_param = name in [
                     "MOBILITY_BONUS", "PASSED_PAWN_PATH_CLEAR_FACTOR",
                     "SPACE_BONUS_FACTOR", "INITIATIVE_FACTOR", "KING_ATTACK_FACTOR",
                     "BAD_BISHOP_FACTOR", "KING_STORM_FACTOR"
                 ]
-
                 if is_float_param:
-                    setattr(ai, name, float(value))  # Ensure floats remain floats
+                    setattr(ai, name, float(value))
                 else:
                     setattr(ai, name, int(round(value)))
-            # else:
-            #     print(f"Warning: Attribute {name} not found in ai module during loading.")
 
 
 # --- 3. Evaluation and Loss ---
@@ -150,7 +140,7 @@ CACHE_MISSES = 0
 def get_eval_with_params(fen_str, theta):
     """Evaluates a FEN using the provided parameters (theta)."""
     global CACHE_HITS, CACHE_MISSES
-    theta_tuple = tuple(theta)  # Convert numpy array to tuple for hashable key
+    theta_tuple = tuple(theta)
     cache_key = (fen_str, theta_tuple)
 
     if cache_key in EVAL_CACHE:
@@ -159,7 +149,7 @@ def get_eval_with_params(fen_str, theta):
     else:
         CACHE_MISSES += 1
         load_params_into_engine(theta)
-        score = ai.evaluate_board_fen(fen_str)  # Call the FEN eval function
+        score = ai.evaluate_board_fen(fen_str)
         EVAL_CACHE[cache_key] = score
         if len(EVAL_CACHE) > 500000:
             keys_to_remove = random.sample(list(EVAL_CACHE.keys()), k=int(len(EVAL_CACHE) * 0.1))
@@ -171,12 +161,9 @@ def get_eval_with_params(fen_str, theta):
 def sigmoid(score, K=1.13):
     """Maps evaluation score (centipawns) to winning probability (0-1)."""
     clamped_score = np.clip(score, -2000, 2000)
-    try:
-        exponent = -math.log(10) * K * clamped_score / 400.0
-        exponent = np.clip(exponent, -700, 700)  # Prevent exp() overflow
-        return 1.0 / (1.0 + np.exp(exponent))
-    except OverflowError:
-        return 0.0 if exponent < 0 else 1.0
+    exponent = -math.log(10) * K * clamped_score / 400.0
+    exponent = np.clip(exponent, -700, 700)
+    return 1.0 / (1.0 + np.exp(exponent))
 
 
 def calculate_batch_loss(theta, data_batch):
@@ -198,12 +185,13 @@ def calculate_batch_loss(theta, data_batch):
         total_squared_error += (predicted_prob - actual_score) ** 2
         valid_samples += 1
 
-    if valid_samples == 0: return 0.0
+    if valid_samples == 0:
+        return 0.0
     return total_squared_error / valid_samples
 
 
 # --- 4. SPSA Implementation ---
-def spsa_tune(initial_theta, data, iterations=50, batch_size=1024,  # Default iterations set to 50
+def spsa_tune(initial_theta, data, iterations=50, batch_size=1024,
               a=0.5, c=0.05, A_factor=0.1, alpha=0.602, gamma=0.101):
     """Performs SPSA optimization."""
     theta = initial_theta.copy()
@@ -234,10 +222,6 @@ def spsa_tune(initial_theta, data, iterations=50, batch_size=1024,  # Default it
             return best_theta
 
         actual_batch_size = min(batch_size, len(data))
-        if actual_batch_size == 0:
-            print("Warning: No data available for batch.")
-            continue
-
         data_batch = random.sample(data, actual_batch_size)
 
         loss_plus = calculate_batch_loss(theta_plus, data_batch)
@@ -252,24 +236,17 @@ def spsa_tune(initial_theta, data, iterations=50, batch_size=1024,  # Default it
 
         theta = theta - ak * gradient_estimate
 
-        # Progress Monitoring (reports every 5 iters or last iter)
+        # Progress Monitoring
         if (k + 1) % 5 == 0 or k == iterations - 1:
-            validation_batch_size = min(batch_size, len(data))
-            current_loss = float('inf')
-            if validation_batch_size > 0:
-                validation_batch = random.sample(data, validation_batch_size)
-                current_loss = calculate_batch_loss(theta, validation_batch)
-
+            current_loss = calculate_batch_loss(theta, random.sample(data, actual_batch_size))
             iteration_time = time.time() - iter_start_time
             if current_loss < best_loss:
                 best_loss = current_loss
                 best_theta = theta.copy()
-                print(
-                    f"Iter {k + 1}/{iterations} | *New Best Loss*: {current_loss:.6f} | ak: {ak:.4e} | ck: {ck:.4e} | Time: {iteration_time:.2f}s")
+                print(f"Iter {k + 1}/{iterations} | *New Best Loss*: {current_loss:.6f} | ak: {ak:.4e} | ck: {ck:.4e} | Time: {iteration_time:.2f}s")
                 np.save('best_theta_interim.npy', best_theta)
             else:
-                print(
-                    f"Iter {k + 1}/{iterations} | Current Loss: {current_loss:.6f} | ak: {ak:.4e} | ck: {ck:.4e} | Time: {iteration_time:.2f}s")
+                print(f"Iter {k + 1}/{iterations} | Current Loss: {current_loss:.6f} | ak: {ak:.4e} | ck: {ck:.4e} | Time: {iteration_time:.2f}s")
 
     total_time = time.time() - start_tune_time
     print(f"\nSPSA Tuning finished in {total_time:.2f} seconds.")
