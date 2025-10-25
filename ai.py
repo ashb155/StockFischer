@@ -124,6 +124,7 @@ SPACE_BONUS_FACTOR = 2.0
 INITIATIVE_FACTOR = 3.0
 INITIATIVE_FLAT_BONUS = 20
 CASTLING_BONUS = 30  # <<< --- ADDED CASTLING BONUS --- <<<
+KNIGHT_SYNERGY_BONUS = 25  # <<< --- ADDED KNIGHT SYNERGY BONUS --- <<<
 
 # King attack weights (Tunable)
 king_attack_weights = {'Q': 5, 'R': 3, 'B': 2, 'N': 2, 'P': 1}
@@ -157,7 +158,7 @@ def _build_parameter_metadata():
             if piece_name in piece_values: _register_param_meta(f"value_{piece_name}", piece_values[piece_name],
                                                                 piece_values, piece_name)
 
-    # *** ADDED CASTLING_BONUS TO LIST ***
+    # *** ADDED KNIGHT_SYNERGY_BONUS and CASTLING_BONUS TO LIST ***
     scalar_constants = [
         "MOBILITY_BONUS", "CENTER_CONTROL_BONUS", "TEMPO_BONUS", "KNIGHT_OUTPOST_BONUS",
         "BISHOP_FIANCHETTO_BONUS", "ROOK_ON_SEVENTH_BONUS", "ROOK_OPEN_FILE_BONUS",
@@ -172,7 +173,8 @@ def _build_parameter_metadata():
         "UNDEVELOPED_MINOR_PENALTY", "UNDEVELOPED_ROOK_PENALTY",
         "KING_NOT_CASTLED_PENALTY", "KING_STUCK_CENTER_PENALTY",
         "PIGS_ON_SEVENTH_BONUS", "BATTERY_BONUS", "SPACE_BONUS_FACTOR",
-        "INITIATIVE_FACTOR", "INITIATIVE_FLAT_BONUS", "CASTLING_BONUS"  # <-- ADDED
+        "INITIATIVE_FACTOR", "INITIATIVE_FLAT_BONUS", "CASTLING_BONUS",
+        "KNIGHT_SYNERGY_BONUS"  # <-- ADDED
     ]
     for const_name in scalar_constants:
         if const_name in current_globals: _register_param_meta(const_name, current_globals[const_name])
@@ -250,6 +252,7 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
     white_bishops, black_bishops = [], []
     white_king_pos, black_king_pos = None, None
 
+    # --- Pre-evaluation setup (no change) ---
     for r_k in range(8):
         for c_k in range(8):
             p_k = internal_board[r_k][c_k]
@@ -277,6 +280,7 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
     king_zone_attack_count = [0] * 2
     white_queen_pos, black_queen_pos = None, None
     white_rooks_bishops, black_rooks_bishops = [], []
+    white_knights, black_knights = [], []  # <<< Added to collect Knight positions
 
     # --- Main Evaluation Loop ---
     for row in range(8):
@@ -303,19 +307,26 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
                 pass
 
             if piece.name == 'N':
+                # --- Original Knight Outpost Logic ---
                 is_s, is_a = False, False;
                 s_r, a_r = (row + (-1, 1)[piece.colour == 'b'], row + (1, -1)[piece.colour == 'b'])
                 if 0 <= s_r < 8:
                     for dc in (-1, 1):
                         sc = col + dc;
                         if 0 <= sc < 8 and (
-                        p := internal_board[s_r][sc]) and p.name == 'P' and p.colour == piece.colour: is_s = True; break
+                                p := internal_board[s_r][
+                                    sc]) and p.name == 'P' and p.colour == piece.colour: is_s = True; break
                 if 0 <= a_r < 8:
                     for dc in (-1, 1):
                         ac = col + dc;
                         if 0 <= ac < 8 and (
-                        p := internal_board[a_r][ac]) and p.name == 'P' and p.colour != piece.colour: is_a = True; break
+                                p := internal_board[a_r][
+                                    ac]) and p.name == 'P' and p.colour != piece.colour: is_a = True; break
                 if is_s and not is_a: val += KNIGHT_OUTPOST_BONUS
+
+                # --- Store Knight position for synergy check later ---
+                (white_knights, black_knights)[piece.colour == 'b'].append((row, col))
+
             elif piece.name == 'B':
                 (white_bishops, black_bishops)[piece.colour == 'b'].append((row, col))
                 (white_rooks_bishops, black_rooks_bishops)[piece.colour == 'b'].append((piece.name, (row, col)))
@@ -351,7 +362,7 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
                         ki = (1, 0)[piece.colour == 'b'];
                         king_zone_attack_count[ki] += aw
 
-    # --- Pawn Structure ---
+    # --- Pawn Structure (no change) ---
     def pawn_structure(pawns, colour):
         bonus = 0;
         files = [0] * 8
@@ -369,9 +380,11 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
             s_dir, s_r = (1, -1)[colour == 'b'], r + (1, -1)[colour == 'b']
             if 0 <= s_r < 8:
                 if c > 0 and (
-                p := internal_board[s_r][c - 1]) and p.name == 'P' and p.colour == colour: bonus += PAWN_CHAIN_BONUS
+                        p := internal_board[s_r][
+                            c - 1]) and p.name == 'P' and p.colour == colour: bonus += PAWN_CHAIN_BONUS
                 if c < 7 and (
-                p := internal_board[s_r][c + 1]) and p.name == 'P' and p.colour == colour: bonus += PAWN_CHAIN_BONUS
+                        p := internal_board[s_r][
+                            c + 1]) and p.name == 'P' and p.colour == colour: bonus += PAWN_CHAIN_BONUS
             b_dir, is_bwd = s_dir, True
             for dc in (-1, 1):
                 if not 0 <= c + dc < 8: continue
@@ -386,7 +399,8 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
                 if 0 <= ar < 8:
                     for da in (-1, 1):
                         if 0 <= c + da < 8 and (
-                        p := internal_board[ar][c + da]) and p.name == 'P' and p.colour != colour: stop = True; break
+                                p := internal_board[ar][
+                                    c + da]) and p.name == 'P' and p.colour != colour: stop = True; break
                 if stop: bonus += BACKWARD_PAWN_PENALTY
             is_pass, p_dir, curr_r = True, (-1, 1)[colour == 'b'], r + (-1, 1)[colour == 'b']
             while 0 <= curr_r < 8:
@@ -405,7 +419,8 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
                 if 0 <= s_r < 8:
                     for dc in (-1, 1):
                         if 0 <= c + dc < 8 and (
-                        p := internal_board[s_r][c + dc]) and p.name == 'P' and p.colour == colour: conn = True; break
+                                p := internal_board[s_r][
+                                    c + dc]) and p.name == 'P' and p.colour == colour: conn = True; break
                 if conn: bonus += PASSED_PAWN_CONNECTED_BONUS
                 bl_r = r + p_dir
                 if 0 <= bl_r < 8 and (b := internal_board[bl_r][c]) and b.colour != colour:
@@ -452,11 +467,40 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
         if idx in (0, 1): bbp -= (bp_lc, bp_dc)[idx] * BAD_BISHOP_FACTOR
     score += bbp
 
-    # --- Bishop Pair ---
+    # --- Bishop Pair (no change) ---
     if len(white_bishops) >= 2: score += BISHOP_PAIR_BONUS
     if len(black_bishops) >= 2: score -= BISHOP_PAIR_BONUS
 
-    # --- King Safety ---
+    # --- NEW: Knight Synergy/Mutual Support ---
+    def check_knight_synergy(knights):
+        bonus = 0
+        if len(knights) < 2: return 0
+
+        # Knight Deltas for checking attack
+        knight_deltas = [(-2, -1), (-2, 1), (-1, -2), (-1, 2), (1, -2), (1, 2), (2, -1), (2, 1)]
+
+        for i in range(len(knights)):
+            for j in range(i + 1, len(knights)):
+                r1, c1 = knights[i]
+                r2, c2 = knights[j]
+
+                # Check if N1 attacks N2 (since they are the same color, this is mutual defense)
+                dr, dc = abs(r1 - r2), abs(c1 - c2)
+                is_mutual_support = (dr == 1 and dc == 2) or (dr == 2 and dc == 1)
+
+                # Check for central influence (r=2 to 5, c=2 to 5 -> squares c3/f6 to f3/c6)
+                is_central = r1 in range(2, 6) and c1 in range(2, 6) and \
+                             r2 in range(2, 6) and c2 in range(2, 6)
+
+                if is_mutual_support and is_central:
+                    bonus += KNIGHT_SYNERGY_BONUS
+
+        return bonus
+
+    score += check_knight_synergy(white_knights)
+    score -= check_knight_synergy(black_knights)
+
+    # --- King Safety (no change) ---
     def king_safety(colour, king_pos, num_attackers):
         if king_pos is None: return 0
         kr, kc = king_pos;
@@ -484,7 +528,7 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
     if white_king_pos: score += int(king_safety('w', white_king_pos, king_zone_attack_count[0]) * (1 - phase))
     if black_king_pos: score -= int(king_safety('b', black_king_pos, king_zone_attack_count[1]) * (1 - phase))
 
-    # --- Connected Rooks ---
+    # --- Connected Rooks (no change) ---
     wr = [(r, c) for r in range(8) for c in range(8) if
           (p := internal_board[r][c]) and p.name == 'R' and p.colour == 'w']
     br = [(r, c) for r in range(8) for c in range(8) if
@@ -502,7 +546,7 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
                 (c1 == c2 and all(internal_board[r][c1] is None for r in
                                   range(min(r1, r2) + 1, max(r1, r2)))): score -= CONNECTED_ROOKS_BONUS
 
-    # --- Undeveloped Pieces & Castling Bonus ---
+    # --- Undeveloped Pieces & Castling Bonus (no change) ---
     if move_count > 4:
         up = 0
         # White
@@ -549,20 +593,20 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
                     castling_rights.get('bKR') or castling_rights.get('bQR')):
                 score -= int(KING_STUCK_CENTER_PENALTY * (1 - phase))
 
-    # --- Central Control ---
+    # --- Central Control (no change) ---
     center = [(r, c) for r in range(2, 6) for c in range(2, 6)]
     for r, c in center:
         if p := internal_board[r][c]:
             bonus = (CENTER_CONTROL_BONUS, CENTER_CONTROL_BONUS // 2)[not (r in (3, 4) and c in (3, 4))]
             score += bonus * (1, -1)[p.colour == 'b']
 
-    # --- Pigs on 7th ---
+    # --- Pigs on 7th (no change) ---
     if sum(1 for c in range(8) if
            (p := internal_board[1][c]) and p.name == 'R' and p.colour == 'w') >= 2: score += PIGS_ON_SEVENTH_BONUS
     if sum(1 for c in range(8) if
            (p := internal_board[6][c]) and p.name == 'R' and p.colour == 'b') >= 2: score -= PIGS_ON_SEVENTH_BONUS
 
-    # --- Battery Bonus ---
+    # --- Battery Bonus (no change) ---
     bb = 0
     if white_queen_pos:
         qr, qc = white_queen_pos
@@ -604,7 +648,7 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
             if is_bat: bb -= BATTERY_BONUS
     score += bb
 
-    # --- Space Control ---
+    # --- Space Control (no change) ---
     sb = 0
     for r in (4, 5, 6):
         for c in (2, 3, 4, 5):
@@ -614,7 +658,7 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
             if (r, c) not in white_pawn_attacks: sb -= SPACE_BONUS_FACTOR
     score += sb
 
-    # --- Initiative ---
+    # --- Initiative (no change) ---
     init_diff = king_zone_attack_count[0] - king_zone_attack_count[1]
     score += int(init_diff * INITIATIVE_FACTOR * (1 - phase))
     if init_diff > 0:
@@ -622,13 +666,13 @@ def evaluate_board(internal_board, turn, castling_rights, enpassant_square,
     elif init_diff < 0:
         score -= int(INITIATIVE_FLAT_BONUS * (1 - phase))
 
-    # --- Tempo ---
+    # --- Tempo (no change) ---
     score += TEMPO_BONUS * (1, -1)[turn == 'b']
 
     return int(score)
 
 
-# --- NEW FUNCTION: evaluate_board_fen ---
+# --- NEW FUNCTION: evaluate_board_fen (no change) ---
 def evaluate_board_fen(fen_str):
     """
     Parses a FEN string, converts to internal representation, and calls evaluate_board.
@@ -659,7 +703,7 @@ def evaluate_board_fen(fen_str):
         return 0
 
 
-# --- Functions below still rely on the Game object ---
+# --- Functions below still rely on the Game object (no change) ---
 
 # (calculate_zobrist_hash function - complete)
 def calculate_zobrist_hash(game):
@@ -706,7 +750,7 @@ def static_exchange_eval_local(game, start, end):
     if not (isinstance(start, tuple) and len(start) == 2 and 0 <= start[0] < 8 and 0 <= start[1] < 8 and
             isinstance(end, tuple) and len(end) == 2 and 0 <= end[0] < 8 and 0 <= end[1] < 8): return 0
     if not (hasattr(game, 'board') and isinstance(game.board, list) and len(game.board) == 8 and isinstance(
-        game.board[0], list) and len(game.board[0]) == 8): return 0
+            game.board[0], list) and len(game.board[0]) == 8): return 0
 
     attacker_piece = game.board[start[0]][start[1]]
     target_piece = game.board[end[0]][end[1]]

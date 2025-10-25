@@ -70,7 +70,8 @@ def register_parameters():
         "KING_NOT_CASTLED_PENALTY", "KING_STUCK_CENTER_PENALTY",
         "PIGS_ON_SEVENTH_BONUS", "BATTERY_BONUS", "SPACE_BONUS_FACTOR",
         "INITIATIVE_FACTOR", "INITIATIVE_FLAT_BONUS",
-        "CASTLING_BONUS"  # <<< --- ADDED CASTLING BONUS HERE --- <<<
+        "CASTLING_BONUS",
+        "KNIGHT_SYNERGY_BONUS"  # <<< --- ADDED THE NEW PARAMETER HERE --- <<<
     ]
     for const_name in scalar_constants:
         if hasattr(ai, const_name):
@@ -125,9 +126,13 @@ def load_params_into_engine(theta):
         else:
             # It's a scalar global constant in ai module
             if hasattr(ai, name):
-                if name in ["MOBILITY_BONUS", "PASSED_PAWN_PATH_CLEAR_FACTOR",
-                            "SPACE_BONUS_FACTOR", "INITIATIVE_FACTOR", "KING_ATTACK_FACTOR", "BAD_BISHOP_FACTOR",
-                            "KING_STORM_FACTOR"]:
+                is_float_param = name in [
+                    "MOBILITY_BONUS", "PASSED_PAWN_PATH_CLEAR_FACTOR",
+                    "SPACE_BONUS_FACTOR", "INITIATIVE_FACTOR", "KING_ATTACK_FACTOR",
+                    "BAD_BISHOP_FACTOR", "KING_STORM_FACTOR"
+                ]
+
+                if is_float_param:
                     setattr(ai, name, float(value))  # Ensure floats remain floats
                 else:
                     setattr(ai, name, int(round(value)))
@@ -306,7 +311,7 @@ if __name__ == "__main__":
     initial_theta = register_parameters()
 
     # --- Run SPSA ---
-    ITERATIONS_TO_RUN = 500
+    ITERATIONS_TO_RUN = 200
 
     optimized_theta = spsa_tune(initial_theta, tuning_data,
                                 iterations=ITERATIONS_TO_RUN,
